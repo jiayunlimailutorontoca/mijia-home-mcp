@@ -14,20 +14,22 @@
 | 变化感知 | 无 | `get_home_changes` 返回自上次快照的 diff |
 | 安全模型 | 开箱即可控制所有家电 | **默认只读**;控制需 `--enable-control` + 白名单;锁/摄像头/燃气与水阀默认拦截;写操作全部落审计日志 |
 | 输出 | 原始 siid/piid 透传 | 语义化(枚举→中文描述、bool→开启/关闭),离线/低电量/故障设备置顶提醒 |
-| 部署 | clone + venv,Unix-first | PyPI + `uvx` 一行运行,Windows/macOS/Linux 一等支持 |
+| 部署 | clone + venv,Unix-first | `uvx` 直接从 GitHub 一行运行,Windows/macOS/Linux 一等支持 |
 
 ## 快速开始
+
+无需 clone,`uvx` 直接从 GitHub 运行。
 
 1. 扫码登录(终端会打印二维码,用米家 App 扫描,凭证约一个月有效):
 
 ```bash
-uvx mijia-home-mcp login
+uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp login
 ```
 
 2. 添加到 Claude Code(只读模式):
 
 ```bash
-claude mcp add mijia-home -- uvx mijia-home-mcp serve
+claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp serve
 ```
 
 或者写入项目 `.mcp.json` / Claude Desktop 配置:
@@ -37,7 +39,12 @@ claude mcp add mijia-home -- uvx mijia-home-mcp serve
   "mcpServers": {
     "mijia-home": {
       "command": "uvx",
-      "args": ["mijia-home-mcp", "serve"]
+      "args": [
+        "--from",
+        "git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp",
+        "mijia-home-mcp",
+        "serve"
+      ]
     }
   }
 }
@@ -45,20 +52,22 @@ claude mcp add mijia-home -- uvx mijia-home-mcp serve
 
 3. 问一句"家里现在什么情况",模型会调用 `get_home_snapshot`。
 
+> 下文示例统一用简写 `mijia-home-mcp serve ...`,实际命令替换为上面的 `uvx --from git+... mijia-home-mcp serve ...`;本地 clone 后 `uv run mijia-home-mcp ...` 也等价。
+
 ### 开启控制(可选)
 
 ```bash
 # 允许控制普通设备(锁/摄像头/燃气与水阀/保险柜仍被拦截)
-claude mcp add mijia-home -- uvx mijia-home-mcp serve --enable-control
+claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp serve --enable-control
 
 # 只允许控制名单内设备(glob 匹配设备名/did/model,可多次传入)
-uvx mijia-home-mcp serve --enable-control --allow "客厅*" --allow "*台灯*"
+mijia-home-mcp serve --enable-control --allow "客厅*" --allow "*台灯*"
 
 # 黑名单优先于白名单
-uvx mijia-home-mcp serve --enable-control --deny "*camera*"
+mijia-home-mcp serve --enable-control --deny "*camera*"
 
 # 明确允许危险设备(不推荐)
-uvx mijia-home-mcp serve --enable-control --allow-dangerous
+mijia-home-mcp serve --enable-control --allow-dangerous
 ```
 
 安全策略细则:
@@ -71,7 +80,7 @@ uvx mijia-home-mcp serve --enable-control --allow-dangerous
 ### 局域网部署(可选)
 
 ```bash
-uvx mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423
+mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423
 ```
 
 ```bash
@@ -119,7 +128,7 @@ CLI 参数优先,也支持环境变量(适合写进 `.mcp.json` 的 `env`):
 ## 已知边界
 
 - 走小米云端接口(上游 mijia-api 逆向实现),状态读取有秒级延迟,无本地直连与事件推送;请控制轮询频率。
-- 凭证约一个月需重新扫码一次(`uvx mijia-home-mcp login`,或对话里直接调 `login` 工具)。
+- 凭证约一个月需重新扫码一次(`mijia-home-mcp login`,或对话里直接调 `login` 工具)。
 - 工具的 `readOnlyHint` 等注解只是提示;真正的安全边界在服务端(只读默认 + 白名单 + 危险设备拦截)。
 - 个别设备的规格页缺少中文 i18n 数据(常见于红外遥控类设备,如空调伴侣里的"空调"),上游 spec 解析会失败;这类设备会出现在快照的 `attention.spec_errors` 里,状态为空但不影响其他设备。
 - `get_home_changes` 的对比基线按 `home` 参数分开存储;跨口径调用(这次传 home、下次不传)各自维护基线。

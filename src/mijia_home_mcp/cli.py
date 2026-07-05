@@ -95,7 +95,7 @@ def _cmd_login(args: argparse.Namespace) -> int:
     api = mijiaAPI(auth_data_path=auth_path)
     api.login()
     print(f"登录成功,凭证已保存到: {auth_path}")
-    print("现在可以启动 MCP server: uvx mijia-home-mcp serve")
+    print("现在可以启动 MCP server: mijia-home-mcp serve")
     return 0
 
 

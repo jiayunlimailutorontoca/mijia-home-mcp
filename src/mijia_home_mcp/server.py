@@ -54,7 +54,7 @@ class ServerContext:
         if not self.settings.auth_path.exists():
             return (
                 f"认证文件不存在: {self.settings.auth_path}。"
-                "请先在终端运行 `uvx mijia-home-mcp login` 扫码登录,"
+                "请先在终端运行 `mijia-home-mcp login` 扫码登录,"
                 "或调用 login 工具。"
             )
         try:
@@ -82,7 +82,7 @@ class ServerContext:
             except LoginError as exc:
                 raise ToolError(
                     f"米家认证已失效且自动刷新失败({exc})。"
-                    "请在终端运行 `uvx mijia-home-mcp login` 重新扫码,或调用 login 工具。"
+                    "请在终端运行 `mijia-home-mcp login` 重新扫码,或调用 login 工具。"
                 ) from exc
         return self.client
 
@@ -104,7 +104,7 @@ def _friendly_errors(fn):
             raise ToolError(str(exc)) from exc
         except LoginError as exc:
             raise ToolError(
-                f"米家认证失效: {exc}。请运行 `uvx mijia-home-mcp login` 重新扫码。"
+                f"米家认证失效: {exc}。请运行 `mijia-home-mcp login` 重新扫码。"
             ) from exc
         except APIError as exc:
             raise ToolError(f"米家云端 API 错误: {exc}") from exc
@@ -408,7 +408,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         if not info.get("logged_in"):
             info.setdefault(
                 "hint",
-                "运行 `uvx mijia-home-mcp login` 扫码登录,或调用 login 工具。",
+                "运行 `mijia-home-mcp login` 扫码登录,或调用 login 工具。",
             )
         return info
 
