@@ -1,0 +1,155 @@
+"""CLI 入口:login(终端扫码)与 serve(启动 MCP server,默认 stdio)。"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+from .config import DEFAULT_AUTH_PATH, Settings
+
+
+def _setup_stderr_logging() -> None:
+    """stdio 传输下 stdout 是协议通道,所有日志必须走 stderr。"""
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    try:
+        # 注意:mijiaAPI 包属性 logger 是子模块,Logger 实例在 mijiaAPI.logger.logger
+        from mijiaAPI.logger import logger as mijia_logger
+
+        mijia_logger.handlers = [
+            h
+            for h in mijia_logger.handlers
+            if not (
+                isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
+            )
+        ]
+    except Exception:  # noqa: BLE001 - 上游日志结构变化不应阻塞启动
+        pass
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="mijia-home-mcp",
+        description="米家全屋状态快照 MCP server(默认只读)",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    p_login = sub.add_parser("login", help="终端扫码登录米家账号并保存凭证")
+    p_login.add_argument(
+        "--auth",
+        type=Path,
+        default=None,
+        help=f"认证文件路径(默认 {DEFAULT_AUTH_PATH},与 mijiaAPI 共用)",
+    )
+
+    p_serve = sub.add_parser("serve", help="启动 MCP server(默认 stdio)")
+    p_serve.add_argument("--auth", type=Path, default=None, help="认证文件路径")
+    p_serve.add_argument(
+        "--enable-control",
+        action="store_true",
+        help="开启控制工具(设置属性/执行动作/运行场景);默认只读",
+    )
+    p_serve.add_argument(
+        "--allow",
+        action="append",
+        default=None,
+        metavar="PATTERN",
+        help="控制白名单(设备名/did/model 的 glob 模式,可多次传入);配置后仅名单内设备可控",
+    )
+    p_serve.add_argument(
+        "--deny",
+        action="append",
+        default=None,
+        metavar="PATTERN",
+        help="控制黑名单,优先于白名单",
+    )
+    p_serve.add_argument(
+        "--allow-dangerous",
+        action="store_true",
+        help="允许控制危险设备(锁/摄像头/燃气与水阀/保险柜);默认拦截",
+    )
+    p_serve.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default="stdio",
+        help="传输方式:本地个人使用选 stdio(默认),局域网共享选 http",
+    )
+    p_serve.add_argument("--host", default="127.0.0.1", help="http 监听地址")
+    p_serve.add_argument("--port", type=int, default=8423, help="http 监听端口")
+    return parser
+
+
+def _cmd_login(args: argparse.Namespace) -> int:
+    # QRlogin 会在终端打印二维码,这里是交互命令,允许使用 stdout
+    from mijiaAPI import mijiaAPI
+
+    # 与 serve 一致:--auth > MIJIA_HOME_MCP_AUTH > 默认路径
+    auth_path = args.auth or Settings.from_env().auth_path
+    auth_path = auth_path.expanduser()
+    auth_path.parent.mkdir(parents=True, exist_ok=True)
+    api = mijiaAPI(auth_data_path=auth_path)
+    api.login()
+    print(f"登录成功,凭证已保存到: {auth_path}")
+    print("现在可以启动 MCP server: uvx mijia-home-mcp serve")
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    _setup_stderr_logging()
+    settings = Settings.from_env()
+    if args.auth:
+        settings.auth_path = args.auth.expanduser()
+    if args.enable_control:
+        settings.enable_control = True
+    if args.allow is not None:
+        settings.allow = args.allow
+    if args.deny is not None:
+        settings.deny = args.deny
+    if args.allow_dangerous:
+        settings.allow_dangerous = True
+    settings.ensure_dirs()
+
+    from .server import build_server
+
+    mcp = build_server(settings)
+    logging.getLogger(__name__).info(
+        "mijia-home-mcp 启动: transport=%s control=%s auth=%s",
+        args.transport,
+        "on" if settings.enable_control else "off(只读)",
+        settings.auth_path,
+    )
+    if args.transport == "http":
+        if args.host not in ("127.0.0.1", "localhost", "::1"):
+            logging.getLogger(__name__).warning(
+                "http 传输当前没有内置鉴权,监听 %s 意味着同网段任何人都能"
+                "读取(以及在开启控制时操作)你的米家设备。请确保仅在可信局域网"
+                "使用并配合防火墙,切勿暴露公网。",
+                args.host,
+            )
+        mcp.run(transport="http", host=args.host, port=args.port, show_banner=False)
+    else:
+        mcp.run(show_banner=False)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "login":
+        return _cmd_login(args)
+    if args.command is None:
+        # 无子命令时按默认参数 serve(stdio 只读)
+        args = parser.parse_args(["serve"])
+    if args.command == "serve":
+        return _cmd_serve(args)
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
