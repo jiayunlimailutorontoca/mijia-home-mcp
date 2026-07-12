@@ -49,6 +49,7 @@ class Settings:
     meow: str | None = None
     webhook: str | None = None
     speaker: str | None = None  # 小爱音箱名称,或 "auto" 用第一台
+    http_token: str | None = None  # http 传输的 Bearer token;不设则无鉴权
 
     @property
     def has_notify_channel(self) -> bool:
@@ -89,6 +90,7 @@ class Settings:
         settings.meow = _env("MEOW")
         settings.webhook = _env("WEBHOOK")
         settings.speaker = _env("SPEAKER")
+        settings.http_token = _env("HTTP_TOKEN")
         return settings
 
     def ensure_dirs(self) -> None:

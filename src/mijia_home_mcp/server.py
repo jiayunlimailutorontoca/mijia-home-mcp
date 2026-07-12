@@ -136,10 +136,19 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
     else:
         ctx.try_init_api()  # 失败不阻塞启动,工具调用时给出指引
 
+    auth = None
+    if settings.http_token:
+        from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
+
+        auth = StaticTokenVerifier(
+            tokens={settings.http_token: {"client_id": "mijia-home-mcp-client"}}
+        )
+
     mcp = FastMCP(
         "mijia-home-mcp",
         version=__version__,
         instructions=SERVER_INSTRUCTIONS,
+        auth=auth,
     )
 
     # ---------------- 读工具 ----------------

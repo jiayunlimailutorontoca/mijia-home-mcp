@@ -144,6 +144,38 @@ def test_send_meow_nickname_and_url(http_sink):
     assert body == {"title": "米家提醒", "msg": "灯开了"}
 
 
+CARD_CHANGES = [
+    {"type": "prop_changed", "device": "客厅台灯", "prop": "on", "from": True, "to": False},
+    {"type": "went_offline", "device": "阳台传感器"},
+]
+
+
+def test_dingtalk_card_when_changes(http_sink):
+    base, received = http_sink
+    send_dingtalk(f"{base}/robot?access_token=tk", "米家提醒", "x", changes=CARD_CHANGES)
+    _, _, body = received[0]
+    assert body["msgtype"] == "markdown"
+    assert "客厅台灯" in body["markdown"]["text"]
+    assert "阳台传感器" in body["markdown"]["text"]
+
+
+def test_feishu_card_when_changes(http_sink):
+    base, received = http_sink
+    send_feishu(f"{base}/hook/xxx", "米家提醒", "x", changes=CARD_CHANGES)
+    _, _, body = received[0]
+    assert body["msg_type"] == "interactive"
+    md = body["card"]["body"]["elements"][0]["content"]
+    assert "客厅台灯" in md and "→" in md
+
+
+def test_pusher_uses_text_without_changes(http_sink):
+    """send_notification 路径(无 changes)仍发纯文本。"""
+    base, received = http_sink
+    Pusher(feishu=f"{base}/hook").push("米家提醒", "手动消息", {"changes": []})
+    _, _, body = received[0]
+    assert body["msg_type"] == "text"
+
+
 def test_pusher_aggregates_and_isolates_failures(http_sink):
     base, received = http_sink
     pusher = Pusher(

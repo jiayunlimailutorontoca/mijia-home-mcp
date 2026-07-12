@@ -213,6 +213,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_serve.add_argument("--host", default="127.0.0.1", help="http 监听地址")
     p_serve.add_argument("--port", type=int, default=8423, help="http 监听端口")
+    p_serve.add_argument(
+        "--http-token",
+        default=None,
+        metavar="TOKEN",
+        help="http 传输的 Bearer token,客户端需带 Authorization: Bearer <TOKEN>;不设则无鉴权",
+    )
     return parser
 
 
@@ -504,7 +510,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         settings.deny = args.deny
     if args.allow_dangerous:
         settings.allow_dangerous = True
-    for channel in ("dingtalk", "dingtalk_secret", "feishu", "feishu_secret", "meow", "webhook", "speaker"):
+    for channel in ("dingtalk", "dingtalk_secret", "feishu", "feishu_secret", "meow", "webhook", "speaker", "http_token"):
         value = getattr(args, channel, None)
         if value is not None:
             setattr(settings, channel, value)
@@ -520,11 +526,11 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         settings.auth_path,
     )
     if args.transport == "http":
-        if args.host not in ("127.0.0.1", "localhost", "::1"):
+        if args.host not in ("127.0.0.1", "localhost", "::1") and not settings.http_token:
             logging.getLogger(__name__).warning(
-                "http 传输当前没有内置鉴权,监听 %s 意味着同网段任何人都能"
-                "读取(以及在开启控制时操作)你的米家设备。请确保仅在可信局域网"
-                "使用并配合防火墙,切勿暴露公网。",
+                "http 传输未配置 --http-token,监听 %s 意味着同网段任何人都能"
+                "读取(以及在开启控制时操作)你的米家设备。强烈建议加上 "
+                "--http-token <随机串>,客户端配 Authorization: Bearer 头。",
                 args.host,
             )
         mcp.run(transport="http", host=args.host, port=args.port, show_banner=False)

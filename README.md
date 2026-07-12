@@ -147,7 +147,17 @@ mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423
 claude mcp add --transport http mijia-home http://<host>:8423/mcp
 ```
 
-> ⚠️ http 传输当前没有内置鉴权:监听 `0.0.0.0` 意味着同网段任何人都能读取(开启控制时还能操作)你的米家设备。只在可信局域网内使用并配合防火墙,切勿暴露公网。
+局域网部署请配置 Bearer token:
+
+```bash
+mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423 --http-token 你的随机串
+```
+
+```bash
+claude mcp add --transport http mijia-home http://<host>:8423/mcp --header "Authorization: Bearer 你的随机串"
+```
+
+> ⚠️ 不设 `--http-token` 时 http 传输无鉴权,同网段任何人都能读取(开启控制时还能操作)你的米家设备;启动时会打印警告。无论是否设 token 都不要暴露公网。
 
 ## 工具一览
 
@@ -223,7 +233,7 @@ mijia-home-mcp watch --speak --meow 昵称 --feishu https://... \
   --only "门锁*" --only "*传感器*" --ignore left-time
 ```
 
-钉钉/飞书/MeoW 收到的是"米家提醒 + 一句话摘要"的文本消息;通用 webhook 收到完整 diff JSON(含 `text` 摘要字段):
+watch 的变化事件在钉钉/飞书里以**卡片**呈现(markdown 列表,逐条设备变化);`send_notification` 的手动消息为纯文本。MeoW 收到"米家提醒 + 一句话摘要";通用 webhook 收到完整 diff JSON(含 `text` 摘要字段):
 
 ```json
 {
@@ -264,6 +274,7 @@ CLI 参数优先,也支持环境变量(适合写进 `.mcp.json` 的 `env`):
 | `MIJIA_HOME_MCP_FEISHU` / `_FEISHU_SECRET` | 通知通道:飞书机器人 webhook 与签名密钥 |
 | `MIJIA_HOME_MCP_DINGTALK` / `_DINGTALK_SECRET` | 通知通道:钉钉机器人 webhook 与加签密钥 |
 | `MIJIA_HOME_MCP_WEBHOOK` | 通知通道:通用 webhook |
+| `MIJIA_HOME_MCP_HTTP_TOKEN` | http 传输的 Bearer token(`--http-token`) |
 
 ## 已知边界
 

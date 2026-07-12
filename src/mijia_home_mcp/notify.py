@@ -89,43 +89,88 @@ def _post_json(url: str, payload: dict, check_body: bool = False) -> None:
             )
 
 
+def _changes_markdown_lines(changes: list[dict], limit: int = 10) -> list[str]:
+    """把变化列表转成 markdown 列表行(钉钉/飞书卡片共用)。"""
+    lines = []
+    for c in changes[:limit]:
+        if c["type"] == "prop_changed":
+            lines.append(f"- **{c['device']}** {c['prop']}: {c['from']} → {c['to']}")
+        else:
+            lines.append(f"- **{c['device']}** {_TYPE_TEXT.get(c['type'], c['type'])}")
+    rest = len(changes) - limit
+    if rest > 0:
+        lines.append(f"- …另有 {rest} 项变化")
+    return lines
+
+
+def _dingtalk_sign_url(webhook_url: str, secret: str) -> str:
+    ts = str(round(time.time() * 1000))
+    sign_str = f"{ts}\n{secret}"
+    sign = base64.b64encode(
+        hmac.new(
+            secret.encode("utf-8"), sign_str.encode("utf-8"), hashlib.sha256
+        ).digest()
+    )
+    return f"{webhook_url}&timestamp={ts}&sign={urllib.parse.quote_plus(sign)}"
+
+
 def send_dingtalk(
-    webhook_url: str, title: str, text: str, secret: Optional[str] = None
+    webhook_url: str,
+    title: str,
+    text: str,
+    secret: Optional[str] = None,
+    changes: Optional[list[dict]] = None,
 ) -> None:
-    """钉钉自定义机器人(text 消息)。
+    """钉钉自定义机器人。有 changes 时发 markdown 卡片,否则发 text。
 
     机器人安全设置用「自定义关键词」时,把关键词设为「米家」即可
     (标题固定含「米家提醒」);用「加签」时传 secret。
     """
-    url = webhook_url
-    if secret:
-        ts = str(round(time.time() * 1000))
-        sign_str = f"{ts}\n{secret}"
-        sign = base64.b64encode(
-            hmac.new(
-                secret.encode("utf-8"), sign_str.encode("utf-8"), hashlib.sha256
-            ).digest()
-        )
-        url += f"&timestamp={ts}&sign={urllib.parse.quote_plus(sign)}"
-    _post_json(
-        url,
-        {"msgtype": "text", "text": {"content": f"{title}\n{text}"}},
-        check_body=True,
-    )
+    url = _dingtalk_sign_url(webhook_url, secret) if secret else webhook_url
+    if changes:
+        md = "\n".join([f"### {title}"] + _changes_markdown_lines(changes))
+        payload: dict[str, Any] = {
+            "msgtype": "markdown",
+            "markdown": {"title": title, "text": md},
+        }
+    else:
+        payload = {"msgtype": "text", "text": {"content": f"{title}\n{text}"}}
+    _post_json(url, payload, check_body=True)
 
 
 def send_feishu(
-    webhook_url: str, title: str, text: str, secret: Optional[str] = None
+    webhook_url: str,
+    title: str,
+    text: str,
+    secret: Optional[str] = None,
+    changes: Optional[list[dict]] = None,
 ) -> None:
-    """飞书自定义机器人(text 消息),可选「签名校验」。
+    """飞书自定义机器人。有 changes 时发 interactive 卡片,否则发 text。
 
     飞书加签与钉钉算法不同:以 timestamp+"\\n"+secret 为 HMAC 密钥、
     空串为消息体计算 SHA256,签名放请求体的 timestamp/sign 字段。
     """
-    payload: dict[str, Any] = {
-        "msg_type": "text",
-        "content": {"text": f"{title}\n{text}"},
-    }
+    if changes:
+        payload: dict[str, Any] = {
+            "msg_type": "interactive",
+            "card": {
+                "schema": "2.0",
+                "header": {
+                    "title": {"tag": "plain_text", "content": title},
+                    "template": "blue",
+                },
+                "body": {
+                    "elements": [
+                        {
+                            "tag": "markdown",
+                            "content": "\n".join(_changes_markdown_lines(changes)),
+                        }
+                    ]
+                },
+            },
+        }
+    else:
+        payload = {"msg_type": "text", "content": {"text": f"{title}\n{text}"}}
     if secret:
         ts = str(int(time.time()))
         key = f"{ts}\n{secret}".encode("utf-8")
@@ -187,14 +232,19 @@ class Pusher:
 
     def push(self, title: str, text: str, diff: dict) -> list[str]:
         errors = []
+        changes = diff.get("changes") or None
         if self.dingtalk:
             try:
-                send_dingtalk(self.dingtalk, title, text, self.dingtalk_secret)
+                send_dingtalk(
+                    self.dingtalk, title, text, self.dingtalk_secret, changes=changes
+                )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"钉钉: {exc}")
         if self.feishu:
             try:
-                send_feishu(self.feishu, title, text, self.feishu_secret)
+                send_feishu(
+                    self.feishu, title, text, self.feishu_secret, changes=changes
+                )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"飞书: {exc}")
         if self.meow:
