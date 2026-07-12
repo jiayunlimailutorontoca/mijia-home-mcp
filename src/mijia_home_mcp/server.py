@@ -391,6 +391,66 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         return client.api.get_consumable_items(_resolve_home_id(client, home))
 
     @mcp.tool(annotations=READ_ONLY)
+    @_friendly_errors
+    def get_battery_report() -> dict:
+        """全屋电量普查:批量读取所有带电池的设备,按电量升序返回。
+
+        回答"哪些设备该换电池了"用这个,比逐设备查询快得多。
+        low 字段列出电量 ≤20% 的设备。
+        """
+        client = ctx.ready_client()
+        return client.battery_report()
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_friendly_errors
+    def get_device_statistics(
+        device: str,
+        siid_piid: str,
+        granularity: Literal["hour", "day", "week", "month"] = "day",
+        limit: int = 7,
+    ) -> list[dict]:
+        """获取设备历史统计数据(如插座耗电量、净化器使用时长)。
+
+        并非所有设备都支持统计;键 siid_piid 需从设备说明或
+        https://home.miot-spec.com 查询(常见如插座功耗为 "7.1")。
+
+        Args:
+            device: 设备名称或 did。
+            siid_piid: 统计键,格式 "siid.piid",如 "7.1"。
+            granularity: 统计粒度 hour/day/week/month。
+            limit: 返回最近多少条,默认7。
+        """
+        import time as _time
+
+        client = ctx.ready_client()
+        dev = client.resolve_device(device)
+        data_type = f"stat_{granularity}_v3"
+        now = int(_time.time())
+        span = {"hour": 3, "day": 62, "week": 365, "month": 730}[granularity]
+        return client.api.get_statistics(
+            {
+                "did": dev["did"],
+                "key": siid_piid,
+                "data_type": data_type,
+                "limit": max(1, min(limit, 64)),
+                "time_start": now - span * 24 * 3600,
+                "time_end": now,
+            }
+        )
+
+    @mcp.prompt
+    def home_briefing() -> str:
+        """生成一份全屋晨报/晚报:状态总览 + 异常提醒 + 变化摘要。"""
+        return (
+            "请给我一份家庭状态简报:\n"
+            "1. 调用 get_home_snapshot 获取全屋状态;\n"
+            "2. 调用 get_home_changes 看看上次以来有什么变化;\n"
+            "3. 用三段话总结:整体状态(几台在线/离线)、需要注意的问题"
+            "(离线/低电量/故障/异常开着的设备)、显著变化。"
+            "口吻像管家汇报,简洁,中文。"
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
     def auth_status() -> dict:
         """查看当前米家登录状态与认证文件路径,排查认证问题时先调这个。"""
         info: dict[str, Any] = {

@@ -28,6 +28,8 @@ async def _call(mcp, name, args=None):
 READ_TOOLS = {
     "get_home_snapshot",
     "get_home_changes",
+    "get_battery_report",
+    "get_device_statistics",
     "list_homes",
     "list_devices",
     "get_device_status",
@@ -191,6 +193,16 @@ def test_get_device_spec_with_dotted_did(fake_api, settings):
     mcp = build_server(settings, api=fake_api)
     spec = _run(_call(mcp, "get_device_spec", {"device_or_model": "blt.3.abc123"}))
     assert spec["name"] == "假温湿度计"
+
+
+def test_battery_report_tool(fake_api, settings):
+    mcp = build_server(settings, api=fake_api)
+    report = _run(_call(mcp, "get_battery_report"))
+    names = [r["name"] for r in report["devices"]]
+    # 两台带 battery-level 的传感器,低电量(10%)排最前
+    assert names[0] == "卧室温湿度计"
+    assert report["low"][0]["battery"] == 10
+    assert report["count"] == 2
 
 
 def test_snapshot_room_filter(fake_api, settings):

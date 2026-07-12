@@ -76,6 +76,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_doctor.add_argument("--auth", type=Path, default=None, help="认证文件路径")
 
+    p_battery = sub.add_parser("battery", help="终端查看全屋电量普查")
+    p_battery.add_argument("--auth", type=Path, default=None, help="认证文件路径")
+
     p_serve = sub.add_parser("serve", help="启动 MCP server(默认 stdio)")
     p_serve.add_argument("--auth", type=Path, default=None, help="认证文件路径")
     p_serve.add_argument(
@@ -270,6 +273,17 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_battery(args: argparse.Namespace) -> int:
+    client, _ = _make_client(args)
+    report = client.battery_report()
+    for row in report["devices"]:
+        level = row["battery"]
+        bar = "!" if isinstance(level, (int, float)) and level <= 20 else " "
+        print(f" {bar} {level:>3}%  {row['name']}  ({row['room']})")
+    print(f"\n共 {report['count']} 台带电池设备,{len(report['low'])} 台低电量(≤20%)")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     _setup_stderr_logging()
     settings = Settings.from_env()
@@ -316,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         "snapshot": _cmd_snapshot,
         "devices": _cmd_devices,
         "doctor": _cmd_doctor,
+        "battery": _cmd_battery,
         "serve": _cmd_serve,
     }
     if args.command is None:

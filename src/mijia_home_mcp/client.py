@@ -366,6 +366,45 @@ class HomeClient:
         raw = {"ts": snapshot["ts"], "devices": raw_state}
         return snapshot, raw
 
+    # ---------- 电量普查(v0.3.0) ----------
+
+    def battery_report(self) -> dict:
+        """批量读取所有带 battery-level 属性的在线设备电量,按电量升序。"""
+        devices = [d for d in self.devices() if _is_online(d)]
+        specs = self._prefetch_specs([d.get("model", "") for d in devices])
+        requests: list[dict] = []
+        meta: dict[tuple, dict] = {}
+        for dev in devices:
+            spec_info = specs.get(dev.get("model", ""), {})
+            for prop in spec_info.get("properties", []):
+                if prop.get("name") == "battery-level" and "r" in prop.get("rw", ""):
+                    method = prop.get("method", {})
+                    key = (dev["did"], method.get("siid"), method.get("piid"))
+                    requests.append(
+                        {"did": dev["did"], "siid": key[1], "piid": key[2]}
+                    )
+                    meta[key] = dev
+                    break
+        results = self.batch_get_props(requests) if requests else {}
+        rows = []
+        for key, result in results.items():
+            dev = meta.get(key)
+            if dev is None or result.get("code", -1) != 0:
+                continue
+            rows.append(
+                {
+                    "name": dev.get("name"),
+                    "room": f"{dev['_home']}/{dev['_room']}",
+                    "battery": result.get("value"),
+                }
+            )
+        rows.sort(key=lambda r: (r["battery"] is None, r["battery"]))
+        return {
+            "devices": rows,
+            "low": [r for r in rows if isinstance(r["battery"], (int, float)) and r["battery"] <= 20],
+            "count": len(rows),
+        }
+
     # ---------- 设备写操作(不经 mijiaDevice,避免其每次全量拉设备列表,
     # 且支持设备级共享的设备) ----------
 
