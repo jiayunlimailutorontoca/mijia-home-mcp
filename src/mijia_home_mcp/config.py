@@ -41,6 +41,19 @@ class Settings:
     allow_dangerous: bool = False
     snapshot_chunk_size: int = 20
     spec_workers: int = 4
+    # 通知通道(安装 MCP 时配置,send_notification 工具统一推送)
+    dingtalk: str | None = None
+    dingtalk_secret: str | None = None
+    feishu: str | None = None
+    meow: str | None = None
+    webhook: str | None = None
+    speaker: str | None = None  # 小爱音箱名称,或 "auto" 用第一台
+
+    @property
+    def has_notify_channel(self) -> bool:
+        return bool(
+            self.dingtalk or self.feishu or self.meow or self.webhook or self.speaker
+        )
 
     @property
     def spec_cache_dir(self) -> Path:
@@ -68,6 +81,12 @@ class Settings:
         settings.allow_dangerous = _env_bool("ALLOW_DANGEROUS")
         settings.allow = _env_list("ALLOW")
         settings.deny = _env_list("DENY")
+        settings.dingtalk = _env("DINGTALK")
+        settings.dingtalk_secret = _env("DINGTALK_SECRET")
+        settings.feishu = _env("FEISHU")
+        settings.meow = _env("MEOW")
+        settings.webhook = _env("WEBHOOK")
+        settings.speaker = _env("SPEAKER")
         return settings
 
     def ensure_dirs(self) -> None:

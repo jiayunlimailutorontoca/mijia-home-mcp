@@ -179,6 +179,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="允许控制危险设备(锁/摄像头/燃气与水阀/保险柜);默认拦截",
     )
     p_serve.add_argument(
+        "--dingtalk",
+        default=None,
+        metavar="WEBHOOK_URL",
+        help="通知通道:钉钉机器人 webhook(供 send_notification 工具统一推送)",
+    )
+    p_serve.add_argument(
+        "--dingtalk-secret", default=None, metavar="SECRET", help="钉钉加签密钥"
+    )
+    p_serve.add_argument(
+        "--feishu", default=None, metavar="WEBHOOK_URL", help="通知通道:飞书机器人 webhook"
+    )
+    p_serve.add_argument(
+        "--meow", default=None, metavar="NICKNAME", help="通知通道:MeoW 昵称或完整 URL"
+    )
+    p_serve.add_argument(
+        "--webhook", default=None, metavar="URL", help="通知通道:通用 webhook"
+    )
+    p_serve.add_argument(
+        "--speaker",
+        default=None,
+        metavar="NAME",
+        help="通知通道:小爱音箱名称(传 auto 用第一台)",
+    )
+    p_serve.add_argument(
         "--transport",
         choices=["stdio", "http"],
         default="stdio",
@@ -368,25 +392,29 @@ def _cmd_watch(args: argparse.Namespace) -> int:
         format_changes_text,
     )
 
-    client, _ = _make_client(args)
+    client, settings = _make_client(args)
     interval = max(15, args.interval)
     if interval != args.interval:
         print(f"(间隔已提升到最小值 {interval}s,保护云端接口)", flush=True)
 
+    # CLI 参数优先,未传时回退到环境变量配置的常驻通道
     speaker = None
-    if args.speak:
+    speak_name = args.speaker_name or (
+        None if settings.speaker in (None, "auto") else settings.speaker
+    )
+    if args.speak or settings.speaker:
         try:
-            speaker = SpeakerNotifier(client, args.speaker_name)
+            speaker = SpeakerNotifier(client, speak_name)
             print(f"变化将通过「{speaker.name}」播报", flush=True)
         except ValueError as exc:
             print(f"播报不可用: {exc}", flush=True)
             return 1
     pusher = Pusher(
-        dingtalk=args.dingtalk,
-        dingtalk_secret=args.dingtalk_secret,
-        feishu=args.feishu,
-        meow=args.meow,
-        webhook=args.webhook,
+        dingtalk=args.dingtalk or settings.dingtalk,
+        dingtalk_secret=args.dingtalk_secret or settings.dingtalk_secret,
+        feishu=args.feishu or settings.feishu,
+        meow=args.meow or settings.meow,
+        webhook=args.webhook or settings.webhook,
     )
     if pusher.channels:
         print(f"变化将推送到: {'、'.join(pusher.channels)}", flush=True)
@@ -469,6 +497,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         settings.deny = args.deny
     if args.allow_dangerous:
         settings.allow_dangerous = True
+    for channel in ("dingtalk", "dingtalk_secret", "feishu", "meow", "webhook", "speaker"):
+        value = getattr(args, channel, None)
+        if value is not None:
+            setattr(settings, channel, value)
     settings.ensure_dirs()
 
     from .server import build_server

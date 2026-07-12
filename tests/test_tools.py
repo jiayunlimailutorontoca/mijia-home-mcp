@@ -223,6 +223,37 @@ def test_list_scenes_accepts_home_name(fake_api, settings):
     assert fake_api.scenes_list_calls[-1] == "home1", "家庭名应被解析为 home_id"
 
 
+def test_send_notification_absent_without_channels(fake_api, settings):
+    """未配置任何通知通道时,send_notification 工具不应注册。"""
+    mcp = build_server(settings, api=fake_api)
+    names = _run(_tool_names(mcp))
+    assert "send_notification" not in names
+
+
+def test_send_notification_speaker_channel(fake_api, settings):
+    settings.speaker = "auto"
+    mcp = build_server(settings, api=fake_api)
+    names = _run(_tool_names(mcp))
+    assert "send_notification" in names
+    result = _run(
+        _call(mcp, "send_notification", {"message": "测试统一推送"})
+    )
+    assert any("小爱音箱" in k and v == "ok" for k, v in result.items())
+    assert fake_api.action_calls[-1]["in"] == ["米家提醒:测试统一推送"]
+    audit = settings.audit_log_path.read_text(encoding="utf-8")
+    assert "send_notification" in audit
+
+
+def test_send_notification_multi_channel_isolation(fake_api, settings):
+    """坏通道(打不通的 webhook)不影响好通道(音箱),结果逐通道报告。"""
+    settings.speaker = "auto"
+    settings.webhook = "http://127.0.0.1:1/dead"
+    mcp = build_server(settings, api=fake_api)
+    result = _run(_call(mcp, "send_notification", {"message": "hi"}))
+    assert result["webhook"] != "ok"
+    assert any("小爱音箱" in k and v == "ok" for k, v in result.items())
+
+
 def test_auth_status_without_login(settings):
     mcp = build_server(settings)  # 不注入 api,认证文件不存在
     data = _run(_call(mcp, "auth_status"))

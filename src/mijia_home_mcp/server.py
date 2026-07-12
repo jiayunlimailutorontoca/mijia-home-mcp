@@ -450,6 +450,54 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
             "口吻像管家汇报,简洁,中文。"
         )
 
+    if settings.has_notify_channel:
+
+        @mcp.tool(annotations=WRITE_SAFE)
+        @_friendly_errors
+        def send_notification(message: str, title: str = "米家提醒") -> dict:
+            """把消息统一推送到安装时配置的所有通知通道。
+
+            通道在 MCP server 配置中声明(钉钉/飞书/MeoW/webhook/小爱音箱),
+            本工具一次调用推送全部通道,返回每个通道的结果。
+            适合"提醒我""通知家里人""推送到手机"这类请求。
+
+            Args:
+                message: 消息正文。
+                title: 消息标题,默认"米家提醒"。
+            """
+            from .notify import Pusher, SpeakerNotifier
+
+            results: dict[str, str] = {}
+            pusher = Pusher(
+                dingtalk=settings.dingtalk,
+                dingtalk_secret=settings.dingtalk_secret,
+                feishu=settings.feishu,
+                meow=settings.meow,
+                webhook=settings.webhook,
+            )
+            errors = pusher.push(title, message, {"changes": []})
+            error_map = dict(e.split(": ", 1) for e in errors if ": " in e)
+            for channel in pusher.channels:
+                results[channel] = error_map.get(channel, "ok")
+            if settings.speaker:
+                client = ctx.ready_client()
+                try:
+                    name = (
+                        None if settings.speaker == "auto" else settings.speaker
+                    )
+                    notifier = SpeakerNotifier(client, name)
+                    notifier.announce(f"{title}:{message}")
+                    results[f"小爱音箱({notifier.name})"] = "ok"
+                except Exception as exc:  # noqa: BLE001 - 单通道失败不影响其他
+                    results["小爱音箱"] = str(exc)
+            ctx.guard.audit(
+                "send_notification",
+                ",".join(results),
+                {"title": title, "message": message},
+                all(v == "ok" for v in results.values()),
+            )
+            return results
+
     @mcp.tool(annotations=READ_ONLY)
     def auth_status() -> dict:
         """查看当前米家登录状态与认证文件路径,排查认证问题时先调这个。"""

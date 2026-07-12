@@ -52,6 +52,41 @@ claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutoro
 
 3. 问一句"家里现在什么情况",模型会调用 `get_home_snapshot`。
 
+### 安装时配置通知通道(推荐)
+
+在 `.mcp.json` 的 `env` 里声明通知通道,server 启动即常驻,Claude 里多出一个 `send_notification` 工具——一次调用**统一推送到所有已配置的通道**:
+
+```json
+{
+  "mcpServers": {
+    "mijia-home": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp",
+        "mijia-home-mcp",
+        "serve"
+      ],
+      "env": {
+        "MIJIA_HOME_MCP_SPEAKER": "auto",
+        "MIJIA_HOME_MCP_MEOW": "你的MeoW昵称",
+        "MIJIA_HOME_MCP_FEISHU": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+        "MIJIA_HOME_MCP_DINGTALK": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
+        "MIJIA_HOME_MCP_DINGTALK_SECRET": "SECxxx"
+      }
+    }
+  }
+}
+```
+
+只配需要的通道即可(都不配则不出现 `send_notification` 工具)。之后在 Claude 里说"提醒我半小时后关火""通知家里人我到楼下了",消息会同时到达音箱、手机推送和群机器人,返回值逐通道报告成败:
+
+```json
+{"小爱音箱(Xiaomi Smart Speaker)": "ok", "MeoW": "ok", "飞书": "ok"}
+```
+
+命令行等价参数:`serve --speaker auto --meow 昵称 --feishu URL --dingtalk URL --dingtalk-secret SEC`。`watch` 未显式传通道参数时也自动复用这套配置。
+
 > 下文示例统一用简写 `mijia-home-mcp serve ...`,实际命令替换为上面的 `uvx --from git+... mijia-home-mcp serve ...`;本地 clone 后 `uv run mijia-home-mcp ...` 也等价。
 
 ### 开启控制(可选)
@@ -104,6 +139,7 @@ claude mcp add --transport http mijia-home http://<host>:8423/mcp
 | `get_device_spec` | 设备支持的属性/动作(名称、类型、范围、枚举值) |
 | `list_scenes` / `list_consumables` | 手动场景 / 耗材状态 |
 | `auth_status` / `login` / `login_status` | 认证状态与会话内扫码续期 |
+| `send_notification` | 统一推送到安装时配置的全部通知通道(配置了通道才出现) |
 
 另有 MCP prompt `home_briefing`:一键生成管家式全屋简报。
 
@@ -198,6 +234,11 @@ CLI 参数优先,也支持环境变量(适合写进 `.mcp.json` 的 `env`):
 | `MIJIA_HOME_MCP_DENY` | `--deny`(逗号分隔) |
 | `MIJIA_HOME_MCP_ALLOW_DANGEROUS` | `--allow-dangerous` |
 | `MIJIA_HOME_MCP_STATE_DIR` | 状态目录(快照基线/审计日志,默认 `~/.config/mijia-home-mcp`) |
+| `MIJIA_HOME_MCP_SPEAKER` | 通知通道:小爱音箱名称,`auto` 用第一台 |
+| `MIJIA_HOME_MCP_MEOW` | 通知通道:MeoW 昵称或完整 URL |
+| `MIJIA_HOME_MCP_FEISHU` | 通知通道:飞书机器人 webhook |
+| `MIJIA_HOME_MCP_DINGTALK` / `_DINGTALK_SECRET` | 通知通道:钉钉机器人 webhook 与加签密钥 |
+| `MIJIA_HOME_MCP_WEBHOOK` | 通知通道:通用 webhook |
 
 ## 已知边界
 
