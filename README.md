@@ -1,5 +1,7 @@
 # mijia-home-mcp
 
+中文 | [English](README.en.md)
+
 米家全屋状态快照 MCP server —— **默认只读,一次调用看清全家**。
 
 让 Claude / Cursor 等 MCP 客户端安全地"看家":一个 `get_home_snapshot` 工具并发拉取全屋设备状态,返回 `家 → 房间 → 设备 → 语义化状态` 的结构化结果;`get_home_changes` 回答"上次以来家里变了什么"。控制能力(开关/属性/场景)默认关闭,需要显式开启并受白名单与危险设备策略约束。
