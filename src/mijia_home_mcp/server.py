@@ -695,6 +695,45 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
 
         @mcp.tool(tags={"control"}, annotations=WRITE_SAFE)
         @_friendly_errors
+        def turn_on(device: str) -> str:
+            """打开设备。自动匹配开关属性(on/power/switch-status),
+            比 set_device_property 少一步查 spec。
+
+            Args:
+                device: 设备名称或 did。
+            """
+            client = ctx.ready_client()
+            dev = client.resolve_device(device)
+            try:
+                ctx.guard.check_device(dev)
+                prop = client.set_power(dev, True)
+            except Exception as exc:
+                ctx.guard.audit("turn_on", dev.get("name", device), {}, False, str(exc))
+                raise
+            ctx.guard.audit("turn_on", dev.get("name", device), {"prop": prop}, True)
+            return f"{dev.get('name')} 已打开"
+
+        @mcp.tool(tags={"control"}, annotations=WRITE_SAFE)
+        @_friendly_errors
+        def turn_off(device: str) -> str:
+            """关闭设备。自动匹配开关属性,同 turn_on。
+
+            Args:
+                device: 设备名称或 did。
+            """
+            client = ctx.ready_client()
+            dev = client.resolve_device(device)
+            try:
+                ctx.guard.check_device(dev)
+                prop = client.set_power(dev, False)
+            except Exception as exc:
+                ctx.guard.audit("turn_off", dev.get("name", device), {}, False, str(exc))
+                raise
+            ctx.guard.audit("turn_off", dev.get("name", device), {"prop": prop}, True)
+            return f"{dev.get('name')} 已关闭"
+
+        @mcp.tool(tags={"control"}, annotations=WRITE_SAFE)
+        @_friendly_errors
         def run_device_action(
             device: str, action_name: str, value: Optional[list] = None
         ) -> str:

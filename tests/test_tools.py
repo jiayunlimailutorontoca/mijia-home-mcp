@@ -45,6 +45,8 @@ CONTROL_TOOLS = {
     "run_device_action",
     "run_scene",
     "run_speaker_command",
+    "turn_on",
+    "turn_off",
 }
 
 
@@ -252,6 +254,27 @@ def test_send_notification_multi_channel_isolation(fake_api, settings):
     result = _run(_call(mcp, "send_notification", {"message": "hi"}))
     assert result["webhook"] != "ok"
     assert any("小爱音箱" in k and v == "ok" for k, v in result.items())
+
+
+def test_turn_on_off(fake_api, settings):
+    settings.enable_control = True
+    mcp = build_server(settings, api=fake_api)
+    msg = _run(_call(mcp, "turn_off", {"device": "客厅台灯"}))
+    assert "已关闭" in msg
+    assert fake_api.set_calls[-1]["value"] is False
+    assert fake_api.set_calls[-1]["siid"] == 2  # 假台灯的 on 在 2.1
+
+    msg = _run(_call(mcp, "turn_on", {"device": "客厅台灯"}))
+    assert "已打开" in msg
+    assert fake_api.set_calls[-1]["value"] is True
+
+    # 纯传感器没有开关,报可读的错
+    with pytest.raises(ToolError, match="没有可写的开关"):
+        _run(_call(mcp, "turn_on", {"device": "卧室温湿度计"}))
+
+    # 危险设备照样拦
+    with pytest.raises(ToolError, match="危险类别"):
+        _run(_call(mcp, "turn_off", {"device": "卧室门锁"}))
 
 
 def test_default_home_scopes_tools(fake_api, settings):

@@ -461,6 +461,29 @@ class HomeClient:
                 )
         return coerced
 
+    def find_power_prop(self, dev: dict) -> Optional[str]:
+        """找设备的开关属性名。没有(纯传感器之类)返回 None。"""
+        from .semantics import POWER_PROP_ALIASES
+
+        spec = self.spec(dev.get("model", ""))
+        props = {p.get("name"): p for p in spec.get("properties", [])}
+        for alias in POWER_PROP_ALIASES:
+            p = props.get(alias)
+            if p is not None and "w" in p.get("rw", "") and p.get("type") == "bool":
+                return alias
+        return None
+
+    def set_power(self, dev: dict, on: bool) -> str:
+        """开/关设备,自动找对开关属性名。返回用掉的属性名。"""
+        prop_name = self.find_power_prop(dev)
+        if prop_name is None:
+            raise DeviceOpError(
+                f"设备 {dev.get('name')} 没有可写的开关属性,可能是传感器类设备。"
+                "可用 get_device_spec 查看它支持什么。"
+            )
+        self.set_property(dev, prop_name, on)
+        return prop_name
+
     def set_property(self, dev: dict, prop_name: str, value) -> Any:
         """设置设备属性,返回实际下发的强转值。"""
         prop = self._find_spec_entry(dev, prop_name, "property")

@@ -43,6 +43,9 @@ _PRIORITY_INDEX = {name: idx for idx, name in enumerate(PRIORITY_PROPS)}
 # model 里带这些词的按危险设备处理,默认不给控制
 DANGEROUS_MODEL_PATTERNS: tuple[str, ...] = ("lock", "camera", "gas", "valve", "safe")
 
+# 开关属性的常见名字,不同厂商的 spec 叫法不统一
+POWER_PROP_ALIASES: tuple[str, ...] = ("on", "power", "switch-status", "switch")
+
 LOW_BATTERY_THRESHOLD = 15
 
 
