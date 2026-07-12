@@ -114,13 +114,27 @@ def send_dingtalk(
     )
 
 
-def send_feishu(webhook_url: str, title: str, text: str) -> None:
-    """飞书自定义机器人(text 消息)。"""
-    _post_json(
-        webhook_url,
-        {"msg_type": "text", "content": {"text": f"{title}\n{text}"}},
-        check_body=True,
-    )
+def send_feishu(
+    webhook_url: str, title: str, text: str, secret: Optional[str] = None
+) -> None:
+    """飞书自定义机器人(text 消息),可选「签名校验」。
+
+    飞书加签与钉钉算法不同:以 timestamp+"\\n"+secret 为 HMAC 密钥、
+    空串为消息体计算 SHA256,签名放请求体的 timestamp/sign 字段。
+    """
+    payload: dict[str, Any] = {
+        "msg_type": "text",
+        "content": {"text": f"{title}\n{text}"},
+    }
+    if secret:
+        ts = str(int(time.time()))
+        key = f"{ts}\n{secret}".encode("utf-8")
+        sign = base64.b64encode(
+            hmac.new(key, b"", digestmod=hashlib.sha256).digest()
+        ).decode("utf-8")
+        payload["timestamp"] = ts
+        payload["sign"] = sign
+    _post_json(webhook_url, payload, check_body=True)
 
 
 def send_meow(nickname_or_url: str, title: str, text: str) -> None:
@@ -147,12 +161,14 @@ class Pusher:
         dingtalk: Optional[str] = None,
         dingtalk_secret: Optional[str] = None,
         feishu: Optional[str] = None,
+        feishu_secret: Optional[str] = None,
         meow: Optional[str] = None,
         webhook: Optional[str] = None,
     ):
         self.dingtalk = dingtalk
         self.dingtalk_secret = dingtalk_secret
         self.feishu = feishu
+        self.feishu_secret = feishu_secret
         self.meow = meow
         self.webhook = webhook
 
@@ -178,7 +194,7 @@ class Pusher:
                 errors.append(f"钉钉: {exc}")
         if self.feishu:
             try:
-                send_feishu(self.feishu, title, text)
+                send_feishu(self.feishu, title, text, self.feishu_secret)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"飞书: {exc}")
         if self.meow:

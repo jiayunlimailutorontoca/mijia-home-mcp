@@ -120,6 +120,21 @@ def test_send_feishu_format(http_sink):
     assert body == {"msg_type": "text", "content": {"text": "米家提醒\n灯开了"}}
 
 
+def test_send_feishu_signed(http_sink):
+    base, received = http_sink
+    send_feishu(f"{base}/hook/xxx", "米家提醒", "灯开了", secret="sec123")
+    _, _, body = received[0]
+    assert "timestamp" in body and "sign" in body
+    # 签名可复算:HMAC(key=ts\nsecret, msg=空串) 的 base64
+    import base64 as b64
+    import hashlib
+    import hmac as hm
+
+    key = f"{body['timestamp']}\nsec123".encode()
+    expected = b64.b64encode(hm.new(key, b"", hashlib.sha256).digest()).decode()
+    assert body["sign"] == expected
+
+
 def test_send_meow_nickname_and_url(http_sink):
     base, received = http_sink
     # 完整 URL 直接用

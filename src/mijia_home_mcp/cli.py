@@ -191,6 +191,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--feishu", default=None, metavar="WEBHOOK_URL", help="通知通道:飞书机器人 webhook"
     )
     p_serve.add_argument(
+        "--feishu-secret", default=None, metavar="SECRET", help="飞书签名校验密钥"
+    )
+    p_serve.add_argument(
         "--meow", default=None, metavar="NICKNAME", help="通知通道:MeoW 昵称或完整 URL"
     )
     p_serve.add_argument(
@@ -413,6 +416,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
         dingtalk=args.dingtalk or settings.dingtalk,
         dingtalk_secret=args.dingtalk_secret or settings.dingtalk_secret,
         feishu=args.feishu or settings.feishu,
+        feishu_secret=settings.feishu_secret,
         meow=args.meow or settings.meow,
         webhook=args.webhook or settings.webhook,
     )
@@ -497,7 +501,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         settings.deny = args.deny
     if args.allow_dangerous:
         settings.allow_dangerous = True
-    for channel in ("dingtalk", "dingtalk_secret", "feishu", "meow", "webhook", "speaker"):
+    for channel in ("dingtalk", "dingtalk_secret", "feishu", "feishu_secret", "meow", "webhook", "speaker"):
         value = getattr(args, channel, None)
         if value is not None:
             setattr(settings, channel, value)

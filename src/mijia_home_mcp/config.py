@@ -45,6 +45,7 @@ class Settings:
     dingtalk: str | None = None
     dingtalk_secret: str | None = None
     feishu: str | None = None
+    feishu_secret: str | None = None
     meow: str | None = None
     webhook: str | None = None
     speaker: str | None = None  # 小爱音箱名称,或 "auto" 用第一台
@@ -84,6 +85,7 @@ class Settings:
         settings.dingtalk = _env("DINGTALK")
         settings.dingtalk_secret = _env("DINGTALK_SECRET")
         settings.feishu = _env("FEISHU")
+        settings.feishu_secret = _env("FEISHU_SECRET")
         settings.meow = _env("MEOW")
         settings.webhook = _env("WEBHOOK")
         settings.speaker = _env("SPEAKER")

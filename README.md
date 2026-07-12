@@ -87,6 +87,31 @@ claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutoro
 
 命令行等价参数:`serve --speaker auto --meow 昵称 --feishu URL --dingtalk URL --dingtalk-secret SEC`。`watch` 未显式传通道参数时也自动复用这套配置。
 
+### 各通道接入步骤
+
+**钉钉**([官方文档](https://open.dingtalk.com/document/robots/custom-robot-access))
+
+1. PC 端钉钉进入目标群 → 右上角群设置 → **机器人**(智能群助手)→ **添加机器人** → 选 **自定义**(通过 Webhook 接入)。
+2. 安全设置三选一,推荐其中之一:
+   - **自定义关键词**:填 `米家`(本项目消息标题固定为"米家提醒",必命中);
+   - **加签**:复制 `SEC` 开头的密钥,填到 `MIJIA_HOME_MCP_DINGTALK_SECRET`。
+3. 完成后复制 Webhook 地址(`https://oapi.dingtalk.com/robot/send?access_token=...`)填到 `MIJIA_HOME_MCP_DINGTALK`。
+4. 注意:钉钉自定义机器人只能加在**内部群**(普通外部群不支持);每群最多 20 个机器人;有每分钟 20 条的限流。
+
+**飞书**([官方文档](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN))
+
+1. 进入目标群 → 右上角 **…** → **设置** → **群机器人** → **添加机器人** → 选 **自定义机器人**。
+2. 设置名称头像后进入 Webhook 配置页,复制地址(`https://open.feishu.cn/open-apis/bot/v2/hook/...`)填到 `MIJIA_HOME_MCP_FEISHU`。
+3. 安全设置可选:
+   - **自定义关键词**:填 `米家`;
+   - **签名校验**:复制密钥填到 `MIJIA_HOME_MCP_FEISHU_SECRET`。
+4. 注意:每群最多 15 个机器人;自定义机器人只能发消息、不能响应 @;Webhook 地址泄露即可被任何人调用,别提交到公开仓库。
+
+**MeoW**(鸿蒙推送,[官方 API 文档](https://www.chuckfang.com/MeoW/api_doc.html))
+
+1. 鸿蒙手机装 MeoW 应用,注册一个昵称。
+2. 昵称直接填到 `MIJIA_HOME_MCP_MEOW`(本项目自动请求 `api.chuckfang.com`;自建服务则填完整 URL)。
+
 > 下文示例统一用简写 `mijia-home-mcp serve ...`,实际命令替换为上面的 `uvx --from git+... mijia-home-mcp serve ...`;本地 clone 后 `uv run mijia-home-mcp ...` 也等价。
 
 ### 开启控制(可选)
@@ -236,7 +261,7 @@ CLI 参数优先,也支持环境变量(适合写进 `.mcp.json` 的 `env`):
 | `MIJIA_HOME_MCP_STATE_DIR` | 状态目录(快照基线/审计日志,默认 `~/.config/mijia-home-mcp`) |
 | `MIJIA_HOME_MCP_SPEAKER` | 通知通道:小爱音箱名称,`auto` 用第一台 |
 | `MIJIA_HOME_MCP_MEOW` | 通知通道:MeoW 昵称或完整 URL |
-| `MIJIA_HOME_MCP_FEISHU` | 通知通道:飞书机器人 webhook |
+| `MIJIA_HOME_MCP_FEISHU` / `_FEISHU_SECRET` | 通知通道:飞书机器人 webhook 与签名密钥 |
 | `MIJIA_HOME_MCP_DINGTALK` / `_DINGTALK_SECRET` | 通知通道:钉钉机器人 webhook 与加签密钥 |
 | `MIJIA_HOME_MCP_WEBHOOK` | 通知通道:通用 webhook |
 

@@ -472,6 +472,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
                 dingtalk=settings.dingtalk,
                 dingtalk_secret=settings.dingtalk_secret,
                 feishu=settings.feishu,
+                feishu_secret=settings.feishu_secret,
                 meow=settings.meow,
                 webhook=settings.webhook,
             )
