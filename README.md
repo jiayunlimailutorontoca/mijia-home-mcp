@@ -95,13 +95,17 @@ claude mcp add --transport http mijia-home http://<host>:8423/mcp
 
 | 工具 | 用途 |
 |---|---|
-| `get_home_snapshot` | 全屋状态快照(compact/full 两档),附离线/低电量/故障提醒 |
+| `get_home_snapshot` | 全屋状态快照(compact/full 两档,支持 home/room 过滤),附离线/低电量/故障提醒 |
 | `get_home_changes` | 与上次快照对比,返回变化列表 |
+| `get_battery_report` | 全屋电量普查,按电量升序,低电量置顶 |
+| `get_device_statistics` | 设备历史统计(耗电量/使用时长,时/日/周/月粒度) |
 | `list_homes` / `list_devices` | 家庭/房间/设备清单,支持过滤 |
 | `get_device_status` | 单设备详细状态(批量拉取) |
 | `get_device_spec` | 设备支持的属性/动作(名称、类型、范围、枚举值) |
 | `list_scenes` / `list_consumables` | 手动场景 / 耗材状态 |
 | `auth_status` / `login` / `login_status` | 认证状态与会话内扫码续期 |
+
+另有 MCP prompt `home_briefing`:一键生成管家式全屋简报。
 
 **控制(需 `--enable-control`):**
 
@@ -111,6 +115,25 @@ claude mcp add --transport http mijia-home http://<host>:8423/mcp
 | `run_device_action` | 执行动作(喂食/启动清扫…) |
 | `run_scene` | 运行米家手动场景 |
 | `run_speaker_command` | 让小爱音箱执行自然语言指令(默认静默) |
+
+## 终端直用(不需要 MCP 客户端)
+
+装好之后 CLI 本身就是个小工具箱:
+
+```bash
+mijia-home-mcp doctor              # 自检:认证/云端连通性/缓存
+mijia-home-mcp snapshot            # 全屋状态一屏看完(--home/--room/--full/--json)
+mijia-home-mcp devices             # 设备清单(名称/位置/model/did)
+mijia-home-mcp battery             # 电量普查,低电量置顶
+mijia-home-mcp watch --interval 60 # 持续监控变化,实时打印(Ctrl-C 退出)
+```
+
+`watch` 实测效果:
+
+```text
+[14:26:04] 基线已建立,开始监控…
+[14:26:38] Mijia Smart Tabletop Dishwasher S2: left-time 159 → 158
+```
 
 ## 配置
 
