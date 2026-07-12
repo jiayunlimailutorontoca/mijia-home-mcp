@@ -184,6 +184,38 @@ def send_meow(nickname_or_url: str, title: str, text: str) -> None:
     _post_json(target, {"title": title, "msg": text}, check_body=True)
 
 
+def send_bark(key_or_url: str, title: str, text: str) -> None:
+    """Bark(iOS 推送)。传 device key 就打官方 api.day.app,传 URL 用自建。"""
+    if key_or_url.startswith(("http://", "https://")):
+        base = key_or_url.rstrip("/")
+        # 自建服务器给到根地址即可,统一走 /push
+        url = base if base.endswith("/push") else f"{base}/push"
+        payload = {"title": title, "body": text}
+        # 自建 URL 里带 key 的情况:/push 不需要 device_key,兼容两种都传
+        _post_json(url, payload, check_body=True)
+    else:
+        _post_json(
+            "https://api.day.app/push",
+            {"device_key": key_or_url, "title": title, "body": text},
+            check_body=True,
+        )
+
+
+def send_ntfy(topic_or_url: str, title: str, text: str) -> None:
+    """ntfy(安卓/桌面推送)。传 topic 走 ntfy.sh,传 URL 用自建。
+
+    走 JSON 发布而不是 Title 头,HTTP 头塞中文要 RFC2047 编码,JSON 没这事。
+    """
+    if topic_or_url.startswith(("http://", "https://")):
+        # 自建:https://my.ntfy.host/mytopic → 根地址 + topic
+        base, _, topic = topic_or_url.rstrip("/").rpartition("/")
+        _post_json(base, {"topic": topic, "title": title, "message": text})
+    else:
+        _post_json(
+            "https://ntfy.sh", {"topic": topic_or_url, "title": title, "message": text}
+        )
+
+
 def send_generic(url: str, title: str, text: str, diff: dict) -> None:
     """通用 webhook,POST 完整 diff。text 字段是现成摘要,接 Bark/ntfy 直接用。"""
     _post_json(url, {"source": "mijia-home-mcp", "title": title, "text": text, **diff})
@@ -199,6 +231,8 @@ class Pusher:
         feishu: Optional[str] = None,
         feishu_secret: Optional[str] = None,
         meow: Optional[str] = None,
+        bark: Optional[str] = None,
+        ntfy: Optional[str] = None,
         webhook: Optional[str] = None,
     ):
         self.dingtalk = dingtalk
@@ -206,6 +240,8 @@ class Pusher:
         self.feishu = feishu
         self.feishu_secret = feishu_secret
         self.meow = meow
+        self.bark = bark
+        self.ntfy = ntfy
         self.webhook = webhook
 
     @property
@@ -213,6 +249,10 @@ class Pusher:
         out = []
         if self.dingtalk:
             out.append("钉钉")
+        if self.bark:
+            out.append("Bark")
+        if self.ntfy:
+            out.append("ntfy")
         if self.feishu:
             out.append("飞书")
         if self.meow:
@@ -243,6 +283,16 @@ class Pusher:
                 send_meow(self.meow, title, text)
             except Exception as exc:
                 errors.append(f"MeoW: {exc}")
+        if self.bark:
+            try:
+                send_bark(self.bark, title, text)
+            except Exception as exc:
+                errors.append(f"Bark: {exc}")
+        if self.ntfy:
+            try:
+                send_ntfy(self.ntfy, title, text)
+            except Exception as exc:
+                errors.append(f"ntfy: {exc}")
         if self.webhook:
             try:
                 send_generic(self.webhook, title, text, diff)

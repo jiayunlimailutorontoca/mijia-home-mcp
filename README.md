@@ -85,6 +85,8 @@ uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp@v0.10.0 
 "env": {
   "MIJIA_HOME_MCP_SPEAKER": "auto",
   "MIJIA_HOME_MCP_MEOW": "你的MeoW昵称",
+  "MIJIA_HOME_MCP_BARK": "你的Bark设备key",
+  "MIJIA_HOME_MCP_NTFY": "你的ntfy主题",
   "MIJIA_HOME_MCP_FEISHU": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
   "MIJIA_HOME_MCP_DINGTALK": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
   "MIJIA_HOME_MCP_DINGTALK_SECRET": "SECxxx"
@@ -106,6 +108,12 @@ uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp@v0.10.0 
 飞书([文档](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN)):群设置 → 群机器人 → 自定义机器人,拿到 webhook 地址。签名校验密钥配 `FEISHU_SECRET`,或者关键词同样填`米家`。webhook 地址别提交到公开仓库,泄露了谁都能往群里发。
 
 MeoW([文档](https://www.chuckfang.com/MeoW/api_doc.html)):鸿蒙手机装 MeoW,注册个昵称,昵称直接填 `MEOW` 就行。自建服务的话填完整 URL。
+
+Bark([文档](https://bark.day.app/)):iPhone 装 Bark,app 里复制 device key 填 `BARK`;自建服务器填完整 URL。
+
+ntfy([文档](https://docs.ntfy.sh/)):安卓/桌面装 ntfy,订阅一个自取的 topic 名,topic 填 `NTFY`;自建填 `https://你的服务器/topic`。注意 ntfy.sh 的公开 topic 谁都能订阅,名字取长取随机。
+
+鸿蒙/苹果/安卓三端都要收的话,MeoW + Bark + ntfy 三个都配上,`send_notification` 一次全推。
 
 ## 开控制
 
@@ -195,7 +203,9 @@ CLI 参数和环境变量等价,参数优先:
 | `MIJIA_HOME_MCP_STATE_DIR` | 状态目录(diff 基线/历史/审计日志),默认 `~/.config/mijia-home-mcp` |
 | `MIJIA_HOME_MCP_HOME_NAME` | 默认家庭(`--home`),多家庭账号用 |
 | `MIJIA_HOME_MCP_SPEAKER` | 小爱音箱名,`auto` 用第一台 |
-| `MIJIA_HOME_MCP_MEOW` | MeoW 昵称或完整 URL |
+| `MIJIA_HOME_MCP_MEOW` | MeoW 昵称或完整 URL(鸿蒙) |
+| `MIJIA_HOME_MCP_BARK` | Bark device key 或自建 URL(iOS) |
+| `MIJIA_HOME_MCP_NTFY` | ntfy topic 或自建 URL(安卓/桌面) |
 | `MIJIA_HOME_MCP_FEISHU` / `_FEISHU_SECRET` | 飞书 webhook / 签名密钥 |
 | `MIJIA_HOME_MCP_DINGTALK` / `_DINGTALK_SECRET` | 钉钉 webhook / 加签密钥 |
 | `MIJIA_HOME_MCP_WEBHOOK` | 通用 webhook |

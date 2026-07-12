@@ -168,6 +168,26 @@ def test_feishu_card_when_changes(http_sink):
     assert "客厅台灯" in md and "→" in md
 
 
+def test_send_bark_key_and_url(http_sink):
+    from mijia_home_mcp.notify import send_bark
+
+    base, received = http_sink
+    send_bark(f"{base}/push", "米家提醒", "灯开了")
+    path, _, body = received[0]
+    assert path == "/push"
+    assert body == {"title": "米家提醒", "body": "灯开了"}
+
+
+def test_send_ntfy_topic_and_url(http_sink):
+    from mijia_home_mcp.notify import send_ntfy
+
+    base, received = http_sink
+    send_ntfy(f"{base}/mytopic", "米家提醒", "灯开了")
+    path, _, body = received[0]
+    assert path == "/"  # 自建 URL:根地址发布,topic 在 body 里
+    assert body == {"topic": "mytopic", "title": "米家提醒", "message": "灯开了"}
+
+
 def test_pusher_uses_text_without_changes(http_sink):
     """send_notification 路径(无 changes)仍发纯文本。"""
     base, received = http_sink

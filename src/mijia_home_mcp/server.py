@@ -546,6 +546,8 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
                 feishu=settings.feishu,
                 feishu_secret=settings.feishu_secret,
                 meow=settings.meow,
+                bark=settings.bark,
+                ntfy=settings.ntfy,
                 webhook=settings.webhook,
             )
             errors = pusher.push(title, message, {"changes": []})

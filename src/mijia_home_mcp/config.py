@@ -47,6 +47,8 @@ class Settings:
     feishu: str | None = None
     feishu_secret: str | None = None
     meow: str | None = None
+    bark: str | None = None
+    ntfy: str | None = None
     webhook: str | None = None
     speaker: str | None = None  # 小爱音箱名称,或 "auto" 用第一台
     http_token: str | None = None  # http 传输的 Bearer token;不设则无鉴权
@@ -54,7 +56,13 @@ class Settings:
     @property
     def has_notify_channel(self) -> bool:
         return bool(
-            self.dingtalk or self.feishu or self.meow or self.webhook or self.speaker
+            self.dingtalk
+            or self.feishu
+            or self.meow
+            or self.bark
+            or self.ntfy
+            or self.webhook
+            or self.speaker
         )
 
     @property
@@ -89,6 +97,8 @@ class Settings:
         settings.feishu = _env("FEISHU")
         settings.feishu_secret = _env("FEISHU_SECRET")
         settings.meow = _env("MEOW")
+        settings.bark = _env("BARK")
+        settings.ntfy = _env("NTFY")
         settings.webhook = _env("WEBHOOK")
         settings.speaker = _env("SPEAKER")
         settings.http_token = _env("HTTP_TOKEN")
