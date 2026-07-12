@@ -37,6 +37,11 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="mijia-home-mcp",
         description="米家全屋状态快照 MCP server(默认只读)",
     )
+    from . import __version__
+
+    parser.add_argument(
+        "--version", action="version", version=f"mijia-home-mcp {__version__}"
+    )
     sub = parser.add_subparsers(dest="command")
 
     p_login = sub.add_parser("login", help="终端扫码登录米家账号并保存凭证")
@@ -46,6 +51,30 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"认证文件路径(默认 {DEFAULT_AUTH_PATH},与 mijiaAPI 共用)",
     )
+
+    p_snapshot = sub.add_parser(
+        "snapshot", help="终端直接查看全屋状态快照(不需要 MCP 客户端)"
+    )
+    p_snapshot.add_argument("--auth", type=Path, default=None, help="认证文件路径")
+    p_snapshot.add_argument("--home", default=None, help="只看指定家庭(名称或ID)")
+    p_snapshot.add_argument("--room", default=None, help="只看指定房间")
+    p_snapshot.add_argument(
+        "--full", action="store_true", help="完整模式(更多属性与原始值)"
+    )
+    p_snapshot.add_argument(
+        "--json", action="store_true", dest="as_json", help="输出原始 JSON"
+    )
+
+    p_devices = sub.add_parser("devices", help="终端列出所有设备")
+    p_devices.add_argument("--auth", type=Path, default=None, help="认证文件路径")
+    p_devices.add_argument(
+        "--json", action="store_true", dest="as_json", help="输出原始 JSON"
+    )
+
+    p_doctor = sub.add_parser(
+        "doctor", help="自检:认证有效性、云端连通性、缓存目录"
+    )
+    p_doctor.add_argument("--auth", type=Path, default=None, help="认证文件路径")
 
     p_serve = sub.add_parser("serve", help="启动 MCP server(默认 stdio)")
     p_serve.add_argument("--auth", type=Path, default=None, help="认证文件路径")
@@ -99,6 +128,148 @@ def _cmd_login(args: argparse.Namespace) -> int:
     return 0
 
 
+def _make_client(args: argparse.Namespace):
+    """终端子命令共用:构建已认证的 HomeClient。"""
+    from mijiaAPI import mijiaAPI
+
+    from .client import HomeClient
+
+    settings = Settings.from_env()
+    if getattr(args, "auth", None):
+        settings.auth_path = args.auth.expanduser()
+    settings.ensure_dirs()
+    if not settings.auth_path.exists():
+        print(f"认证文件不存在: {settings.auth_path}")
+        print("请先运行: mijia-home-mcp login")
+        raise SystemExit(1)
+    api = mijiaAPI(auth_data_path=settings.auth_path)
+    if not api.available:
+        api._refresh_token()
+    return HomeClient(api, settings), settings
+
+
+def _fmt_state(state: dict) -> str:
+    return ", ".join(f"{k}={v}" for k, v in list(state.items())[:6])
+
+
+def _cmd_snapshot(args: argparse.Namespace) -> int:
+    import json
+
+    client, _ = _make_client(args)
+    snapshot, _raw = client.build_snapshot(
+        home=args.home,
+        detail="full" if args.full else "compact",
+        room=args.room,
+    )
+    if args.as_json:
+        print(json.dumps(snapshot, ensure_ascii=False, indent=1))
+        return 0
+
+    stats = snapshot["stats"]
+    for home in snapshot["homes"]:
+        print(f"\n■ {home['name']}")
+        for room in home["rooms"]:
+            print(f"  ▸ {room['name']}")
+            for dev in room["devices"]:
+                mark = "·" if dev["online"] else "✗离线"
+                state = _fmt_state(dev.get("state", {})) if dev["online"] else ""
+                print(f"    {mark} {dev['name']}  {state}")
+    att = snapshot["attention"]
+    issues = att["offline"] + att["low_battery"] + att["faults"]
+    if issues:
+        print("\n⚠ 需要注意:")
+        for item in issues:
+            print(f"  - {item}")
+    print(
+        f"\n{stats['devices_online']}/{stats['devices_total']} 台在线,"
+        f"{stats['props_fetched']} 个属性,耗时 {stats['elapsed_s']}s"
+    )
+    return 0
+
+
+def _cmd_devices(args: argparse.Namespace) -> int:
+    import json
+
+    client, _ = _make_client(args)
+    devices = client.devices()
+    if args.as_json:
+        slim = [
+            {
+                "name": d.get("name"),
+                "did": d.get("did"),
+                "model": d.get("model"),
+                "online": bool(d.get("isOnline", True)),
+                "home": d["_home"],
+                "room": d["_room"],
+            }
+            for d in devices
+        ]
+        print(json.dumps(slim, ensure_ascii=False, indent=1))
+        return 0
+    width = max((len(d.get("name") or "") for d in devices), default=10)
+    for d in sorted(devices, key=lambda x: (x["_home"], x["_room"])):
+        online = "  " if d.get("isOnline", True) else "✗ "
+        print(
+            f"{online}{(d.get('name') or '?'):<{width}}  "
+            f"{d['_home']}/{d['_room']}  {d.get('model')}  {d.get('did')}"
+        )
+    print(f"\n共 {len(devices)} 台设备")
+    return 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    import time as _time
+
+    settings = Settings.from_env()
+    if getattr(args, "auth", None):
+        settings.auth_path = args.auth.expanduser()
+
+    def check(name: str, ok: bool, detail: str = "") -> bool:
+        print(f"  [{'OK' if ok else '!!'}] {name}" + (f" — {detail}" if detail else ""))
+        return ok
+
+    print("mijia-home-mcp 自检:")
+    all_ok = check(
+        "认证文件存在",
+        settings.auth_path.exists(),
+        str(settings.auth_path),
+    )
+    if not all_ok:
+        print("\n先运行: mijia-home-mcp login")
+        return 1
+
+    from mijiaAPI import mijiaAPI
+
+    try:
+        api = mijiaAPI(auth_data_path=settings.auth_path)
+        fresh = api.available
+        if not fresh:
+            api._refresh_token()
+        check("凭证有效", api.available, "已自动刷新" if not fresh else "无需刷新")
+    except Exception as exc:  # noqa: BLE001
+        check("凭证有效", False, f"{exc};请重新 login")
+        return 1
+
+    try:
+        t0 = _time.monotonic()
+        homes = api.get_homes_list()
+        dt = _time.monotonic() - t0
+        check(
+            "米家云端连通",
+            True,
+            f"{len(homes)} 个家庭,{dt:.1f}s",
+        )
+    except Exception as exc:  # noqa: BLE001
+        check("米家云端连通", False, str(exc))
+        return 1
+
+    check("状态目录可写", True, str(settings.state_dir))
+    specs = list(settings.spec_cache_dir.glob("*.json"))
+    check("spec 缓存", True, f"{len(specs)} 个型号已缓存")
+    print("\n一切正常。启动 MCP: mijia-home-mcp serve")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     _setup_stderr_logging()
     settings = Settings.from_env()
@@ -140,15 +311,17 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    if args.command == "login":
-        return _cmd_login(args)
+    handlers = {
+        "login": _cmd_login,
+        "snapshot": _cmd_snapshot,
+        "devices": _cmd_devices,
+        "doctor": _cmd_doctor,
+        "serve": _cmd_serve,
+    }
     if args.command is None:
         # 无子命令时按默认参数 serve(stdio 只读)
         args = parser.parse_args(["serve"])
-    if args.command == "serve":
-        return _cmd_serve(args)
-    parser.print_help()
-    return 1
+    return handlers[args.command](args)
 
 
 if __name__ == "__main__":

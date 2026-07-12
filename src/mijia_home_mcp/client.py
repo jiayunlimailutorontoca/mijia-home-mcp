@@ -223,6 +223,7 @@ class HomeClient:
         home: Optional[str] = None,
         detail: str = "compact",
         max_props_per_device: int = 8,
+        room: Optional[str] = None,
     ) -> tuple[dict, dict]:
         """构建全屋快照。
 
@@ -232,6 +233,13 @@ class HomeClient:
         """
         t0 = time.monotonic()
         devices = self._filter_devices(home)
+        if room:
+            room = room.strip()
+            room_devices = [d for d in devices if d["_room"] == room]
+            if not room_devices:
+                known = ", ".join(sorted({d["_room"] for d in devices}))
+                raise DeviceResolveError(f"未找到房间「{room}」。可选: {known}")
+            devices = room_devices
         full = detail == "full"
         if full:
             max_props_per_device = max(max_props_per_device, 24)

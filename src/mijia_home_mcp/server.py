@@ -147,6 +147,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
     @_friendly_errors
     def get_home_snapshot(
         home: Optional[str] = None,
+        room: Optional[str] = None,
         detail: Literal["compact", "full"] = "compact",
         max_props_per_device: int = 8,
     ) -> dict:
@@ -158,11 +159,14 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
 
         Args:
             home: 可选,家庭名称或ID;不传则包含所有家庭(含共享设备)。
+            room: 可选,房间名;只关心单个房间时用,更快更省 token。
             detail: compact 返回语义化精简状态;full 附带原始值/属性描述/更新时间/did。
             max_props_per_device: 每台设备最多读取的属性数,默认8(full 模式自动放宽到24)。
         """
         client = ctx.ready_client()
-        snapshot, _raw = client.build_snapshot(home, detail, max_props_per_device)
+        snapshot, _raw = client.build_snapshot(
+            home, detail, max_props_per_device, room=room
+        )
         return snapshot
 
     @mcp.tool(annotations=READ_ONLY)

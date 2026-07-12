@@ -193,6 +193,17 @@ def test_get_device_spec_with_dotted_did(fake_api, settings):
     assert spec["name"] == "假温湿度计"
 
 
+def test_snapshot_room_filter(fake_api, settings):
+    mcp = build_server(settings, api=fake_api)
+    data = _run(_call(mcp, "get_home_snapshot", {"home": "我的家", "room": "客厅"}))
+    rooms = [r["name"] for h in data["homes"] for r in h["rooms"]]
+    assert rooms == ["客厅"]
+    assert data["stats"]["devices_total"] == 2
+
+    with pytest.raises(ToolError, match="未找到房间"):
+        _run(_call(mcp, "get_home_snapshot", {"room": "地下室"}))
+
+
 def test_list_scenes_accepts_home_name(fake_api, settings):
     mcp = build_server(settings, api=fake_api)
     scenes = _run(_call(mcp, "list_scenes", {"home": "我的家"}))
