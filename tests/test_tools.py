@@ -303,6 +303,36 @@ def test_default_home_in_auth_status(fake_api, settings):
     assert info["default_home"] == "我的家"
 
 
+def test_resources(fake_api, settings):
+    """三个 resource:列表可见、内容正确、默认家庭生效。"""
+    import json
+
+    settings.home = "我的家"
+    mcp = build_server(settings, api=fake_api)
+
+    async def go():
+        async with Client(mcp) as c:
+            resources = await c.list_resources()
+            uris = {str(r.uri) for r in resources}
+            assert {"mijia://devices", "mijia://snapshot", "mijia://homes"} <= uris
+
+            devs = await c.read_resource("mijia://devices")
+            data = json.loads(devs[0].text)
+            assert len(data) == 7  # 默认家庭过滤,共享设备不在
+            assert all(d["home"] == "我的家" for d in data)
+
+            snap = await c.read_resource("mijia://snapshot")
+            sdata = json.loads(snap[0].text)
+            assert sdata["stats"]["devices_total"] == 7
+
+            homes = await c.read_resource("mijia://homes")
+            hdata = json.loads(homes[0].text)
+            assert hdata[0]["name"] == "我的家"
+            assert "客厅" in hdata[0]["rooms"]
+
+    _run(go())
+
+
 def test_auth_status_without_login(settings):
     mcp = build_server(settings)  # 不注入 api,认证文件不存在
     data = _run(_call(mcp, "auth_status"))

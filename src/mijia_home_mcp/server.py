@@ -159,6 +159,56 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         # 多家庭账号可以在配置里锁一个默认家庭;工具显式传了以传的为准
         return home if home is not None else settings.home
 
+    # resources:给客户端翻的资料。龙虾会转成 resources_read 工具,
+    # Claude Code 里用 @ 引用。devices 便宜随便读,snapshot 有 30s 缓存兜底。
+
+    @mcp.resource(
+        "mijia://devices",
+        description="设备清单:名称/did/model/在线状态/家庭/房间。几乎不变,读取便宜。",
+        mime_type="application/json",
+    )
+    def resource_devices() -> list[dict]:
+        client = ctx.ready_client()
+        home = settings.home
+        devices = client._filter_devices(home) if home else client.devices()
+        return [
+            {
+                "name": d.get("name"),
+                "did": d.get("did"),
+                "model": d.get("model"),
+                "online": _is_online(d),
+                "home": d["_home"],
+                "room": d["_room"],
+            }
+            for d in devices
+        ]
+
+    @mcp.resource(
+        "mijia://snapshot",
+        description="全屋实时状态快照(compact)。读取会拉小米云端,约几秒,30s 内重复读走缓存。",
+        mime_type="application/json",
+    )
+    def resource_snapshot() -> dict:
+        client = ctx.ready_client()
+        snapshot, _raw = client.build_snapshot(settings.home, "compact", 8)
+        return snapshot
+
+    @mcp.resource(
+        "mijia://homes",
+        description="家庭与房间结构。",
+        mime_type="application/json",
+    )
+    def resource_homes() -> list[dict]:
+        client = ctx.ready_client()
+        return [
+            {
+                "name": h.get("name"),
+                "id": h.get("id"),
+                "rooms": [r.get("name") for r in h.get("roomlist", []) or []],
+            }
+            for h in client.homes()
+        ]
+
     # 读工具
 
     @mcp.tool(annotations=READ_ONLY)

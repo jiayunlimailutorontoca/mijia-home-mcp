@@ -161,6 +161,16 @@ claude mcp add --transport http mijia-home http://<host>:8423/mcp --header "Auth
 
 还有个 prompt `home_briefing`,生成一份全屋简报。
 
+### Resources
+
+除了工具,还挂了三个 MCP resource,适合支持 resource 的客户端(OpenClaw 会转成 `resources_read` 工具,Claude Code 里 `@` 引用):
+
+- `mijia://devices` — 设备清单(名/did/model/在线/位置),几乎不变,随便读
+- `mijia://homes` — 家庭与房间结构
+- `mijia://snapshot` — 实时快照,读取会拉云端(几秒),30s 缓存兜底
+
+配置了默认家庭的话 resources 同样只看那个家。
+
 ## 命令行
 
 CLI 本身能单独用,不需要 MCP 客户端:
