@@ -114,7 +114,12 @@ SPEAKER_SPEC = {
             "name": "execute-text-directive",
             "description": "Execute Text Directive / 执行文本指令",
             "method": {"siid": 5, "aiid": 4},
-        }
+        },
+        {
+            "name": "play-text",
+            "description": "Play Text / 播放文本",
+            "method": {"siid": 5, "aiid": 5},
+        },
     ],
 }
 

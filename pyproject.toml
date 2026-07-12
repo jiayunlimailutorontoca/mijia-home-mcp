@@ -1,6 +1,6 @@
 [project]
 name = "mijia-home-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "米家全屋状态快照 MCP server:默认只读、一次调用获取全屋设备状态、支持变化 diff,控制能力显式开启"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -17,6 +17,7 @@ classifiers = [
 dependencies = [
     "mijiaAPI>=4.1.2,<5",
     "fastmcp>=3.4,<4",
+    "requests>=2.28",
 ]
 
 [project.urls]

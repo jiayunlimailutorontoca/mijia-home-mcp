@@ -90,6 +90,36 @@ def _build_parser() -> argparse.ArgumentParser:
         default=60,
         help="轮询间隔秒数,默认60;请勿设置过小以免触发云端限流",
     )
+    p_watch.add_argument(
+        "--speak",
+        action="store_true",
+        help="有变化时通过小爱音箱 TTS 播报(play-text,纯播报不执行指令)",
+    )
+    p_watch.add_argument(
+        "--speaker-name",
+        default=None,
+        help="指定播报用的小爱音箱名称;不传用找到的第一台",
+    )
+    p_watch.add_argument(
+        "--webhook",
+        default=None,
+        metavar="URL",
+        help="有变化时把 diff JSON POST 到该 URL",
+    )
+    p_watch.add_argument(
+        "--only",
+        action="append",
+        default=None,
+        metavar="PATTERN",
+        help="只关注设备名命中该 glob 的变化(可多次传入)",
+    )
+    p_watch.add_argument(
+        "--ignore",
+        action="append",
+        default=None,
+        metavar="PATTERN",
+        help="忽略设备名或属性名命中该 glob 的变化,如 --ignore left-time(可多次传入)",
+    )
 
     p_serve = sub.add_parser("serve", help="启动 MCP server(默认 stdio)")
     p_serve.add_argument("--auth", type=Path, default=None, help="认证文件路径")
@@ -300,11 +330,33 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     import time as _time
     from datetime import datetime
 
+    from .notify import (
+        SpeakerNotifier,
+        filter_changes,
+        format_changes_text,
+        send_webhook,
+    )
+
     client, _ = _make_client(args)
     interval = max(15, args.interval)
     if interval != args.interval:
         print(f"(间隔已提升到最小值 {interval}s,保护云端接口)", flush=True)
-    print(f"每 {interval}s 轮询一次,监控范围: {args.home or '全部家庭'}。Ctrl-C 退出。\n", flush=True)
+
+    speaker = None
+    if args.speak:
+        try:
+            speaker = SpeakerNotifier(client, args.speaker_name)
+            print(f"变化将通过「{speaker.name}」播报", flush=True)
+        except ValueError as exc:
+            print(f"播报不可用: {exc}", flush=True)
+            return 1
+    if args.webhook:
+        print(f"变化将 POST 到 {args.webhook}", flush=True)
+
+    print(
+        f"每 {interval}s 轮询一次,监控范围: {args.home or '全部家庭'}。Ctrl-C 退出。\n",
+        flush=True,
+    )
 
     _, prev = client.build_snapshot(home=args.home)
     print(f"[{datetime.now():%H:%M:%S}] 基线已建立,开始监控…", flush=True)
@@ -320,9 +372,30 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             diff = client.diff_raw(prev, cur)
             prev = cur
             ts = f"[{datetime.now():%H:%M:%S}]"
+            diff["changes"] = filter_changes(
+                diff["changes"], only=args.only, ignore=args.ignore
+            )
             if not diff["changes"]:
                 print(f"{ts} 无变化", flush=True)
                 continue
+            if speaker is not None:
+                try:
+                    speaker.announce("米家提醒:" + format_changes_text(diff["changes"]))
+                except Exception as exc:  # noqa: BLE001 - 通知失败不中断监控
+                    print(f"{ts} 播报失败: {exc}", flush=True)
+            if args.webhook:
+                try:
+                    send_webhook(
+                        args.webhook,
+                        {
+                            "source": "mijia-home-mcp",
+                            "home": args.home,
+                            **diff,
+                            "text": format_changes_text(diff["changes"]),
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"{ts} webhook 失败: {exc}", flush=True)
             for c in diff["changes"]:
                 if c["type"] == "prop_changed":
                     print(
