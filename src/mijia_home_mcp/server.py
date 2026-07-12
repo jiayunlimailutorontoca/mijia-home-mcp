@@ -24,6 +24,7 @@ from . import __version__
 from .client import DeviceOpError, DeviceResolveError, HomeClient, _is_online
 from .config import Settings
 from .guard import ControlDenied, ControlGuard
+from .history import EventHistory
 from .semantics import humanize_value
 
 READ_ONLY = {"readOnlyHint": True, "openWorldHint": True}
@@ -195,7 +196,51 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
             }
         diff = client.diff_raw(prev, raw)
         diff["attention"] = snapshot["attention"]
+        EventHistory(settings.state_dir).append(diff["changes"], home=home)
         return diff
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_friendly_errors
+    def query_history(
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        device: Optional[str] = None,
+        prop: Optional[str] = None,
+        event_type: Optional[
+            Literal[
+                "prop_changed",
+                "went_offline",
+                "came_online",
+                "device_added",
+                "device_removed",
+            ]
+        ] = None,
+        limit: int = 100,
+    ) -> dict:
+        """查询本地事件历史,回答"今天门开过几次""洗衣机几点跑完"这类问题。
+
+        事件在 `mijia-home-mcp watch` 运行期间、以及每次 get_home_changes
+        调用时记录,保留 30 天;记录之外的时段没有数据。
+
+        Args:
+            since: 起始时间(ISO 格式,如 2026-07-12T14:00);默认 24 小时前。
+            until: 截止时间;默认现在。
+            device: 设备名过滤,支持 glob(如 "门锁*")。
+            prop: 属性名过滤,支持 glob(如 "door-state")。
+            event_type: 事件类型过滤。
+            limit: 最多返回条数,默认 100,上限 500。
+        """
+        try:
+            return EventHistory(settings.state_dir).query(
+                since=since,
+                until=until,
+                device=device,
+                prop=prop,
+                event_type=event_type,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise ToolError(f"时间格式无效: {exc}。请用 ISO 格式,如 2026-07-12T14:00") from exc
 
     @mcp.tool(annotations=READ_ONLY)
     @_friendly_errors

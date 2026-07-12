@@ -388,6 +388,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     import time as _time
     from datetime import datetime
 
+    from .history import EventHistory
     from .notify import (
         Pusher,
         SpeakerNotifier,
@@ -396,6 +397,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     )
 
     client, settings = _make_client(args)
+    history = EventHistory(settings.state_dir)
     interval = max(15, args.interval)
     if interval != args.interval:
         print(f"(间隔已提升到最小值 {interval}s,保护云端接口)", flush=True)
@@ -448,6 +450,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             if not diff["changes"]:
                 print(f"{ts} 无变化", flush=True)
                 continue
+            history.append(diff["changes"], home=args.home)
             summary = format_changes_text(diff["changes"])
             if speaker is not None:
                 try:
