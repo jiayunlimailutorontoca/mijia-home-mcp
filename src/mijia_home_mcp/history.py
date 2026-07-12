@@ -1,7 +1,5 @@
-"""本地事件历史:watch 运行时把每条变化落 JSONL,query 供 AI 回答
-"今天下午门开过几次"这类问题。
-
-存储:state_dir/history/events-YYYYMMDD.jsonl,按天分文件,自动清理过期。
+"""本地事件历史。watch 跑着的时候每条变化落一行 JSONL,
+按天一个文件,留 30 天,query_history 从这里读。
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ def _day_file(history_dir: Path, day: datetime) -> Path:
 
 
 def _parse_ts(value: str) -> datetime:
-    """解析 ISO 时间;裸日期按当天 00:00。统一转为本地 naive 时间比较。"""
+    # 带时区的转成本地 naive 再比,免得 naive 和 aware 比较直接炸
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is not None:
         dt = dt.astimezone().replace(tzinfo=None)
@@ -34,7 +32,7 @@ class EventHistory:
         self.history_dir = state_dir / "history"
 
     def append(self, changes: list[dict], home: Optional[str] = None) -> None:
-        """追加一批变化事件;写入失败静默(记录是尽力而为,不影响监控)。"""
+        # 尽力而为,写不进去不能影响 watch 主流程
         if not changes:
             return
         now = datetime.now()
@@ -71,11 +69,7 @@ class EventHistory:
         event_type: Optional[str] = None,
         limit: int = 100,
     ) -> dict:
-        """按时间范围与过滤条件查询事件,新→旧排序。
-
-        since/until 为 ISO 时间字符串;since 默认 24 小时前。
-        device/prop 支持 glob。limit 上限 500。
-        """
+        """查事件,新的在前。since 不传默认查最近 24 小时。"""
         since_dt = _parse_ts(since) if since else datetime.now() - timedelta(hours=24)
         until_dt = _parse_ts(until) if until else datetime.now()
         limit = max(1, min(limit, MAX_QUERY_LIMIT))

@@ -1,4 +1,7 @@
-"""FastMCP server:读工具默认注册,控制工具仅在 enable_control 时注册。"""
+"""MCP server 本体。读工具永远注册,控制工具要 enable_control 才有。
+
+工具的 docstring 会被客户端展示给模型,所以那些写得比较啰嗦是故意的。
+"""
 
 from __future__ import annotations
 
@@ -39,7 +42,7 @@ SERVER_INSTRUCTIONS = """米家全屋状态 MCP。使用建议:
 
 
 class ServerContext:
-    """持有 api/client/登录状态,供工具闭包共享。"""
+    """api/client/登录状态,工具闭包里共享的那份。"""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -51,7 +54,7 @@ class ServerContext:
         self._login_status: dict = {"status": "idle"}
 
     def try_init_api(self) -> Optional[str]:
-        """尝试从认证文件初始化,失败返回原因。"""
+        """从认证文件初始化,失败返回原因字符串(不抛,启动时也会调)。"""
         if not self.settings.auth_path.exists():
             return (
                 f"认证文件不存在: {self.settings.auth_path}。"
@@ -64,14 +67,14 @@ class ServerContext:
                 api._refresh_token()
             if not api.available:
                 return "认证已过期且无法自动刷新,请重新扫码登录。"
-        except Exception as exc:  # noqa: BLE001 - 启动失败要给出可读原因
+        except Exception as exc:
             return f"认证初始化失败: {exc}"
         self.api = api
         self.client = HomeClient(api, self.settings)
         return None
 
     def ready_client(self) -> HomeClient:
-        """返回可用的 HomeClient,不可用则抛带指引的 ToolError。"""
+        """拿到能用的 client,拿不到就抛 ToolError 告诉模型该怎么办。"""
         if self.api is None:
             error = self.try_init_api()
             if error:
@@ -93,7 +96,7 @@ class ServerContext:
 
 
 def _friendly_errors(fn):
-    """把领域异常转成对 LLM 可读的 ToolError。"""
+    """各处的异常统一包成 ToolError,message 里写清下一步,模型才能自救。"""
 
     @functools.wraps(fn)
     def inner(*args, **kwargs):
@@ -129,12 +132,13 @@ def _friendly_errors(fn):
 
 
 def build_server(settings: Settings, api: Any = None) -> FastMCP:
-    """构建 MCP server。api 参数用于测试注入替身,生产环境不传。"""
+    """api 参数是给测试塞假对象用的,正常跑不传。"""
     ctx = ServerContext(settings)
     if api is not None:
         ctx.adopt_api(api)
     else:
-        ctx.try_init_api()  # 失败不阻塞启动,工具调用时给出指引
+        # 认证失败也照常起 server,等工具被调用时再报,报错里带指引
+        ctx.try_init_api()
 
     auth = None
     if settings.http_token:
@@ -151,7 +155,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         auth=auth,
     )
 
-    # ---------------- 读工具 ----------------
+    # 读工具
 
     @mcp.tool(annotations=READ_ONLY)
     @_friendly_errors
@@ -544,7 +548,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
                     notifier = SpeakerNotifier(client, name)
                     notifier.announce(f"{title}:{message}")
                     results[f"小爱音箱({notifier.name})"] = "ok"
-                except Exception as exc:  # noqa: BLE001 - 单通道失败不影响其他
+                except Exception as exc:
                     results["小爱音箱"] = str(exc)
             ctx.guard.audit(
                 "send_notification",
@@ -570,7 +574,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         else:
             try:
                 info["logged_in"] = bool(ctx.api.available)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 info["logged_in"] = False
                 info["hint"] = str(exc)
         if not info.get("logged_in"):
@@ -616,7 +620,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
                     with ctx._login_lock:
                         ctx.adopt_api(new_api)
                         ctx._login_status = {"status": "success"}
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     with ctx._login_lock:
                         ctx._login_status = {"status": "error", "message": str(exc)}
 
@@ -646,7 +650,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
                 return f"登录失败: {message}"
             return "等待扫码中,请扫描 login 返回的二维码后再次查询。"
 
-    # ---------------- 控制工具(显式开启才注册) ----------------
+    # 控制工具,enable_control 才注册
 
     if settings.enable_control:
 

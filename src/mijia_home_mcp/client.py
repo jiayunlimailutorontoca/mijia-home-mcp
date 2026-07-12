@@ -1,7 +1,7 @@
-"""HomeClient:在 mijiaAPI 之上做缓存、批量拉取、快照构建与 diff。
+"""在 mijiaAPI 之上包一层:缓存、批量属性读取、快照和 diff。
 
-上游 mijiaAPI 的读属性是逐属性一次云端调用;这里全部走批量接口
-get_devices_prop([{did,siid,piid},...]),整屋快照只需少量请求。
+上游 mijiaDevice.get() 一个属性打一次云端,整屋读一遍要几分钟,
+所以这里全部改走 get_devices_prop 的批量接口。
 """
 
 from __future__ import annotations
@@ -34,19 +34,19 @@ def _now_iso() -> str:
 
 
 def _is_online(device: dict) -> bool:
+    # 不同接口返回的在线字段名不一致
     for key in ("isOnline", "is_online", "online"):
         if key in device:
             return bool(device[key])
-    # 字段缺失时按在线处理,让属性读取自己失败并暴露错误
-    return True
+    return True  # 缺字段就当在线,读属性失败自然会暴露
 
 
 class DeviceResolveError(Exception):
-    """设备名/did 无法唯一定位时抛出,message 面向 LLM 可读。"""
+    """设备名/did 定位不到或不唯一。message 会直接透给模型。"""
 
 
 class DeviceOpError(Exception):
-    """设备读写操作失败(值非法/云端返回错误码),message 面向 LLM 可读。"""
+    """设备读写失败(值非法/云端错误码)。message 会直接透给模型。"""
 
 
 class HomeClient:
@@ -55,11 +55,9 @@ class HomeClient:
         self.settings = settings
         self._cache: dict[str, tuple[float, Any]] = {}
         self._spec_memo: dict[str, dict] = {}
-        # 快照短缓存:对话里连续追问时避免重复 10 秒级全量拉取
+        # 整屋快照要 6~10s,对话里连着问两次没必要重新拉
         self._snap_cache: dict[tuple, tuple[float, dict, dict]] = {}
         self.snapshot_ttl_s = 30.0
-
-    # ---------- 基础数据(带 TTL 缓存) ----------
 
     def _cached(self, key: str, loader):
         hit = self._cache.get(key)
@@ -77,7 +75,7 @@ class HomeClient:
         return self._cached("homes", self.api.get_homes_list)
 
     def devices(self) -> list[dict]:
-        """全部设备(含共享设备),并标注 _home/_room。"""
+        """全部设备(含共享的),附 _home/_room 标注。"""
 
         def load() -> list[dict]:
             own = self.api.get_devices_list()
@@ -111,10 +109,8 @@ class HomeClient:
 
         return self._cached("devices", load)
 
-    # ---------- 设备定位 ----------
-
     def resolve_device(self, ident: str) -> dict:
-        """按 did 精确 → 名称精确 → 名称唯一子串 的顺序定位设备。"""
+        """did 精确 → 名称精确 → 名称唯一子串,依次尝试。"""
         ident = (ident or "").strip()
         if not ident:
             raise DeviceResolveError("设备标识为空,请提供设备名称或 did")
@@ -145,8 +141,6 @@ class HomeClient:
             f"未找到设备「{ident}」。可先调用 list_devices 查看全部设备名称"
         )
 
-    # ---------- spec ----------
-
     def spec(self, model: str) -> dict:
         if model in self._spec_memo:
             return self._spec_memo[model]
@@ -155,13 +149,13 @@ class HomeClient:
         return info
 
     def _prefetch_specs(self, models: list[str]) -> dict[str, dict]:
-        """并发拉取(命中磁盘缓存则近乎零开销),失败的 model 映射到 {'error': ...}。"""
+        """并发预拉 spec,失败的 model 给 {'error': ...},不让个别设备拖垮快照。"""
         out: dict[str, dict] = {}
 
         def fetch(model: str) -> tuple[str, dict]:
             try:
                 return model, self.spec(model)
-            except Exception as exc:  # noqa: BLE001 - spec 失败不应中断快照
+            except Exception as exc:
                 return model, {"error": str(exc)}
 
         unique = sorted(set(models))
@@ -172,14 +166,11 @@ class HomeClient:
                 out[model] = info
         return out
 
-    # ---------- 批量属性读取 ----------
-
     def batch_get_props(self, requests: list[dict]) -> dict[tuple, dict]:
-        """分块批量读取属性,返回 {(did, siid, piid): result}。
+        """分块批量读属性,返回 {(did, siid, piid): result}。
 
-        单块失败降级记录 error,不中断整体。
-        刻意串行:上游 mijiaAPI 共享 requests.Session 且请求内可能触发
-        token 刷新重建 session,并发调用有竞态风险。
+        块之间串行,别改成并发:上游共享一个 requests.Session,
+        请求途中还可能刷 token 重建 session。
         """
         results: dict[tuple, dict] = {}
         chunk = self.settings.snapshot_chunk_size
@@ -195,7 +186,8 @@ class HomeClient:
                 for item in ret:
                     key = (item.get("did"), item.get("siid"), item.get("piid"))
                     results[key] = item
-            except Exception as exc:  # noqa: BLE001 - 单块失败降级
+            except Exception as exc:
+                # 整块失败,里面每个属性都标上错误,别的块照常
                 for r in part:
                     results[(r["did"], r["siid"], r["piid"])] = {
                         "code": -1,
@@ -203,14 +195,11 @@ class HomeClient:
                     }
         return results
 
-    # ---------- 快照 ----------
-
     def _filter_devices(self, home: Optional[str]) -> list[dict]:
         devices = self.devices()
         if not home:
             return devices
         home = home.strip()
-        # 按家庭名称或 id 匹配
         matched_names = set()
         for h in self.homes():
             if home in (h.get("name"), str(h.get("id"))):
@@ -230,14 +219,11 @@ class HomeClient:
         room: Optional[str] = None,
         force_fresh: bool = False,
     ) -> tuple[dict, dict]:
-        """构建全屋快照。
+        """构建全屋快照,返回 (snapshot, raw_state)。
 
-        返回 (snapshot, raw_state):
-        - snapshot: 给 LLM 的结构化结果(home→room→device→语义化状态)
-        - raw_state: 用于 diff 持久化的原始值映射
-
-        30s 内相同口径的重复调用直接返回缓存(snapshot 附 cached=True),
-        连续追问不重复付出 10 秒级的全量拉取。
+        snapshot 是给模型看的分组结果,raw_state 是给 diff 用的原始值。
+        30s 内同口径重复调用直接吃缓存(结果带 cached=True);
+        diff 那条路必须传 force_fresh,拿缓存去 diff 等于跟自己比。
         """
         cache_key = (home, detail, max_props_per_device, room)
         if not force_fresh:
@@ -263,7 +249,7 @@ class HomeClient:
         online_devices = [d for d in devices if _is_online(d)]
         specs = self._prefetch_specs([d.get("model", "") for d in online_devices])
 
-        # 组装批量请求,同时记住 (did,siid,piid) → (device, prop)
+        # 组请求的同时记下 (did,siid,piid) → (device, prop),回来好对号
         requests: list[dict] = []
         req_meta: dict[tuple, tuple[dict, dict]] = {}
         spec_errors: dict[str, str] = {}
@@ -285,15 +271,13 @@ class HomeClient:
 
         prop_results = self.batch_get_props(requests) if requests else {}
 
-        # 按设备聚合状态
         device_state: dict[str, dict] = {}
         attention_low_battery: list[str] = []
         attention_faults: list[str] = []
         fetch_error_count = 0
         for key, result in prop_results.items():
             meta = req_meta.get(key)
-            if meta is None:
-                # 云端返回了未请求的键(或类型不一致),跳过
+            if meta is None:  # 云端偶尔回没请求过的键
                 continue
             dev, prop = meta
             did = dev["did"]
@@ -326,7 +310,6 @@ class HomeClient:
                         "error": result.get("error", f"code={result.get('code')}")
                     }
 
-        # home → room → devices 分组
         grouped: dict[str, dict[str, list[dict]]] = {}
         offline_names: list[str] = []
         raw_state: dict[str, dict] = {}
@@ -383,10 +366,8 @@ class HomeClient:
         self._snap_cache[cache_key] = (time.monotonic(), snapshot, raw)
         return snapshot, raw
 
-    # ---------- 电量普查(v0.3.0) ----------
-
     def battery_report(self) -> dict:
-        """批量读取所有带 battery-level 属性的在线设备电量,按电量升序。"""
+        """所有带 battery-level 的在线设备电量,低的排前面。"""
         devices = [d for d in self.devices() if _is_online(d)]
         specs = self._prefetch_specs([d.get("model", "") for d in devices])
         requests: list[dict] = []
@@ -422,8 +403,8 @@ class HomeClient:
             "count": len(rows),
         }
 
-    # ---------- 设备写操作(不经 mijiaDevice,避免其每次全量拉设备列表,
-    # 且支持设备级共享的设备) ----------
+    # 写操作没走上游的 mijiaDevice:它构造一次就全量拉一遍设备列表,
+    # 而且只认自有设备,别人单独共享给你的设备会直接 NotFound。
 
     def _find_spec_entry(self, dev: dict, name: str, kind: str) -> dict:
         spec = self.spec(dev.get("model", ""))
@@ -439,7 +420,7 @@ class HomeClient:
 
     @staticmethod
     def _coerce_value(prop: dict, value: Union[bool, int, float, str]):
-        """把 LLM 传来的字符串值按 spec 类型强转并校验范围/枚举。"""
+        """模型传参基本都是字符串,按 spec 的类型转过去,顺带校验范围和枚举。"""
         ptype = prop.get("type")
         try:
             if ptype == "bool":
@@ -497,7 +478,8 @@ class HomeClient:
         )
         result = ret[0] if isinstance(ret, list) else ret
         code = result.get("code", -1)
-        if code not in (0, 1):  # 1 = 网关已接收,无法确认执行结果
+        # code 1 = 网关收到了但不保证执行,zigbee 子设备常见,当成功处理
+        if code not in (0, 1):
             raise DeviceOpError(
                 f"设置 {dev.get('name')} 的 {prop_name} 失败,云端返回 code={code}"
             )
@@ -510,8 +492,8 @@ class HomeClient:
         value: Optional[list] = None,
         in_args: Optional[list] = None,
     ) -> None:
-        """执行设备动作。value 对应云端 'value' 键,in_args 对应 'in' 键
-        (小爱音箱 execute-text-directive 使用后者,与上游行为一致)。"""
+        """执行动作。大部分动作参数走 value 键,音箱的
+        execute-text-directive/play-text 走 in 键,两个都留着。"""
         action = self._find_spec_entry(dev, action_name, "action")
         method = action.get("method", {})
         payload: dict[str, Any] = {
@@ -531,7 +513,7 @@ class HomeClient:
                 f"执行 {dev.get('name')} 的动作 {action_name} 失败,云端返回 code={code}"
             )
 
-    # ---------- diff 与持久化 ----------
+    # diff 基线的持久化
 
     def _snapshot_path(self, home: Optional[str]):
         key = hashlib.md5((home or "__all__").encode("utf-8")).hexdigest()[:12]
@@ -547,7 +529,7 @@ class HomeClient:
             return None
 
     def save_raw(self, home: Optional[str], raw: dict) -> None:
-        """原子写基线文件:先写临时文件再 os.replace,避免并发/中断产生半截 JSON。"""
+        # 先写 tmp 再 replace,进程被杀时不会留半截 JSON
         self.settings.ensure_dirs()
         path = self._snapshot_path(home)
         tmp = path.with_suffix(".tmp")
@@ -572,6 +554,7 @@ class HomeClient:
             elif not pd.get("online") and nd.get("online"):
                 changes.append({"type": "came_online", "device": name})
             for prop, new_value in nd.get("values", {}).items():
+                # 只比两边都有的属性,离线→上线时一堆属性从无到有,不算变化
                 if prop in pd.get("values", {}) and pd["values"][prop] != new_value:
                     changes.append(
                         {

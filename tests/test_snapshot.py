@@ -1,4 +1,4 @@
-"""HomeClient 快照与 diff 的行为测试(完全离线)。"""
+"""快照和 diff 的测试,全离线。"""
 
 import pytest
 

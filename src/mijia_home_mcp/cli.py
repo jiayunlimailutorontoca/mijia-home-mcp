@@ -1,4 +1,4 @@
-"""CLI 入口:login(终端扫码)与 serve(启动 MCP server,默认 stdio)。"""
+"""CLI 入口。serve 起 MCP server,其他子命令是能单独用的小工具。"""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from .config import DEFAULT_AUTH_PATH, Settings
 
 
 def _setup_stderr_logging() -> None:
-    """stdio 传输下 stdout 是协议通道,所有日志必须走 stderr。"""
+    # stdio 模式下 stdout 是 JSON-RPC 通道,往里打一行日志协议就断了
     logging.basicConfig(
         stream=sys.stderr,
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     try:
-        # 注意:mijiaAPI 包属性 logger 是子模块,Logger 实例在 mijiaAPI.logger.logger
+        # mijiaAPI 包上的 logger 属性是子模块不是 Logger,实例得从子模块里拿
         from mijiaAPI.logger import logger as mijia_logger
 
         mijia_logger.handlers = [
@@ -28,7 +28,7 @@ def _setup_stderr_logging() -> None:
                 isinstance(h, logging.StreamHandler) and h.stream is sys.stdout
             )
         ]
-    except Exception:  # noqa: BLE001 - 上游日志结构变化不应阻塞启动
+    except Exception:
         pass
 
 
@@ -355,7 +355,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         if not fresh:
             api._refresh_token()
         check("凭证有效", api.available, "已自动刷新" if not fresh else "无需刷新")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         check("凭证有效", False, f"{exc};请重新 login")
         return 1
 
@@ -368,7 +368,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             True,
             f"{len(homes)} 个家庭,{dt:.1f}s",
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         check("米家云端连通", False, str(exc))
         return 1
 
@@ -444,7 +444,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             client.invalidate_cache()
             try:
                 _, cur = client.build_snapshot(home=args.home)
-            except Exception as exc:  # noqa: BLE001 - 单轮失败不退出
+            except Exception as exc:
                 print(f"[{datetime.now():%H:%M:%S}] 本轮拉取失败: {exc}", flush=True)
                 continue
             diff = client.diff_raw(prev, cur)
@@ -461,7 +461,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             if speaker is not None:
                 try:
                     speaker.announce("米家提醒:" + summary)
-                except Exception as exc:  # noqa: BLE001 - 通知失败不中断监控
+                except Exception as exc:
                     print(f"{ts} 播报失败: {exc}", flush=True)
             for err in pusher.push("米家提醒", summary, {"home": args.home, **diff}):
                 print(f"{ts} 推送失败 {err}", flush=True)

@@ -2,39 +2,27 @@
 
 中文 | [English](README.en.md)
 
-米家全屋状态快照 MCP server —— **默认只读,一次调用看清全家**。
+米家的 MCP server,主要解决一个问题:想让 Claude 知道家里什么情况,不该需要十几轮工具调用。
 
-让 Claude / Cursor 等 MCP 客户端安全地"看家":一个 `get_home_snapshot` 工具并发拉取全屋设备状态,返回 `家 → 房间 → 设备 → 语义化状态` 的结构化结果;`get_home_changes` 回答"上次以来家里变了什么"。控制能力(开关/属性/场景)默认关闭,需要显式开启并受白名单与危险设备策略约束。
+`get_home_snapshot` 一次调用把全屋设备状态都拉回来(走批量接口,65 台设备大概 9 秒),按 家/房间/设备 组织,枚举值翻译成人话,离线和低电量的设备单独列出来。`get_home_changes` 告诉你上次问过之后家里变了什么。
 
-基于 [Do1e/mijia-api](https://github.com/Do1e/mijia-api)(GPL-3.0),与其共用登录凭证(扫码一次约保活一个月)。
+默认只读。控制设备的工具要加 `--enable-control` 才会注册,而且锁、摄像头、燃气阀这类东西额外拦了一道。我不太放心让模型直接碰这些。
 
-## 为什么不是又一个米家 MCP
+登录用的是 [Do1e/mijia-api](https://github.com/Do1e/mijia-api),凭证文件也跟它共用(`~/.config/mijia-api/auth.json`),扫一次码大概管一个月。
 
-| | 常见米家 MCP | mijia-home-mcp |
-|---|---|---|
-| 问"家里什么情况" | N+1 轮逐设备查询 | `get_home_snapshot` 一次调用,批量接口并发拉取 |
-| 变化感知 | 无 | `get_home_changes` 返回自上次快照的 diff |
-| 安全模型 | 开箱即可控制所有家电 | **默认只读**;控制需 `--enable-control` + 白名单;锁/摄像头/燃气与水阀默认拦截;写操作全部落审计日志 |
-| 输出 | 原始 siid/piid 透传 | 语义化(枚举→中文描述、bool→开启/关闭),离线/低电量/故障设备置顶提醒 |
-| 部署 | clone + venv,Unix-first | `uvx` 直接从 GitHub 一行运行,Windows/macOS/Linux 一等支持 |
+## 安装
 
-## 快速开始
-
-无需 clone,`uvx` 直接从 GitHub 运行。
-
-1. 扫码登录(终端会打印二维码,用米家 App 扫描,凭证约一个月有效):
+不用 clone,uvx 直接跑:
 
 ```bash
+# 先扫码登录,终端会打印二维码
 uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp login
-```
 
-2. 添加到 Claude Code(只读模式):
-
-```bash
+# 加到 Claude Code
 claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp serve
 ```
 
-或者写入项目 `.mcp.json` / Claude Desktop 配置:
+或者 `.mcp.json`:
 
 ```json
 {
@@ -52,239 +40,140 @@ claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutoro
 }
 ```
 
-3. 问一句"家里现在什么情况",模型会调用 `get_home_snapshot`。
+装完问一句"家里现在什么情况"就能用了。
 
-### 安装时配置通知通道(推荐)
+后面的示例统一简写成 `mijia-home-mcp ...`,实际替换成上面 `uvx --from git+...` 那串,或者 clone 之后 `uv run mijia-home-mcp ...`。
 
-在 `.mcp.json` 的 `env` 里声明通知通道,server 启动即常驻,Claude 里多出一个 `send_notification` 工具——一次调用**统一推送到所有已配置的通道**:
+## 通知通道
+
+在 env 里配好通道,Claude 里会多一个 `send_notification` 工具,一次调用推所有配置的通道。什么都不配的话这个工具不会出现。
 
 ```json
-{
-  "mcpServers": {
-    "mijia-home": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp",
-        "mijia-home-mcp",
-        "serve"
-      ],
-      "env": {
-        "MIJIA_HOME_MCP_SPEAKER": "auto",
-        "MIJIA_HOME_MCP_MEOW": "你的MeoW昵称",
-        "MIJIA_HOME_MCP_FEISHU": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
-        "MIJIA_HOME_MCP_DINGTALK": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
-        "MIJIA_HOME_MCP_DINGTALK_SECRET": "SECxxx"
-      }
-    }
-  }
+"env": {
+  "MIJIA_HOME_MCP_SPEAKER": "auto",
+  "MIJIA_HOME_MCP_MEOW": "你的MeoW昵称",
+  "MIJIA_HOME_MCP_FEISHU": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+  "MIJIA_HOME_MCP_DINGTALK": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
+  "MIJIA_HOME_MCP_DINGTALK_SECRET": "SECxxx"
 }
 ```
 
-只配需要的通道即可(都不配则不出现 `send_notification` 工具)。之后在 Claude 里说"提醒我半小时后关火""通知家里人我到楼下了",消息会同时到达音箱、手机推送和群机器人,返回值逐通道报告成败:
+返回值逐通道报成败,坏一个不影响其他的:
 
 ```json
 {"小爱音箱(Xiaomi Smart Speaker)": "ok", "MeoW": "ok", "飞书": "ok"}
 ```
 
-命令行等价参数:`serve --speaker auto --meow 昵称 --feishu URL --dingtalk URL --dingtalk-secret SEC`。`watch` 未显式传通道参数时也自动复用这套配置。
+`watch`(见下文)没显式传通道参数时也用这套配置。
 
-### 各通道接入步骤
+### 通道怎么申请
 
-**钉钉**([官方文档](https://open.dingtalk.com/document/robots/custom-robot-access))
+钉钉([文档](https://open.dingtalk.com/document/robots/custom-robot-access)):群设置 → 机器人 → 添加自定义机器人。安全设置选"自定义关键词"填`米家`就行(消息标题固定是"米家提醒"),或者选加签、把 SEC 开头的密钥配到 `DINGTALK_SECRET`。只能加内部群,限流每分钟 20 条。
 
-1. PC 端钉钉进入目标群 → 右上角群设置 → **机器人**(智能群助手)→ **添加机器人** → 选 **自定义**(通过 Webhook 接入)。
-2. 安全设置三选一,推荐其中之一:
-   - **自定义关键词**:填 `米家`(本项目消息标题固定为"米家提醒",必命中);
-   - **加签**:复制 `SEC` 开头的密钥,填到 `MIJIA_HOME_MCP_DINGTALK_SECRET`。
-3. 完成后复制 Webhook 地址(`https://oapi.dingtalk.com/robot/send?access_token=...`)填到 `MIJIA_HOME_MCP_DINGTALK`。
-4. 注意:钉钉自定义机器人只能加在**内部群**(普通外部群不支持);每群最多 20 个机器人;有每分钟 20 条的限流。
+飞书([文档](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN)):群设置 → 群机器人 → 自定义机器人,拿到 webhook 地址。签名校验密钥配 `FEISHU_SECRET`,或者关键词同样填`米家`。webhook 地址别提交到公开仓库,泄露了谁都能往群里发。
 
-**飞书**([官方文档](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN))
+MeoW([文档](https://www.chuckfang.com/MeoW/api_doc.html)):鸿蒙手机装 MeoW,注册个昵称,昵称直接填 `MEOW` 就行。自建服务的话填完整 URL。
 
-1. 进入目标群 → 右上角 **…** → **设置** → **群机器人** → **添加机器人** → 选 **自定义机器人**。
-2. 设置名称头像后进入 Webhook 配置页,复制地址(`https://open.feishu.cn/open-apis/bot/v2/hook/...`)填到 `MIJIA_HOME_MCP_FEISHU`。
-3. 安全设置可选:
-   - **自定义关键词**:填 `米家`;
-   - **签名校验**:复制密钥填到 `MIJIA_HOME_MCP_FEISHU_SECRET`。
-4. 注意:每群最多 15 个机器人;自定义机器人只能发消息、不能响应 @;Webhook 地址泄露即可被任何人调用,别提交到公开仓库。
-
-**MeoW**(鸿蒙推送,[官方 API 文档](https://www.chuckfang.com/MeoW/api_doc.html))
-
-1. 鸿蒙手机装 MeoW 应用,注册一个昵称。
-2. 昵称直接填到 `MIJIA_HOME_MCP_MEOW`(本项目自动请求 `api.chuckfang.com`;自建服务则填完整 URL)。
-
-> 下文示例统一用简写 `mijia-home-mcp serve ...`,实际命令替换为上面的 `uvx --from git+... mijia-home-mcp serve ...`;本地 clone 后 `uv run mijia-home-mcp ...` 也等价。
-
-### 开启控制(可选)
+## 开控制
 
 ```bash
-# 允许控制普通设备(锁/摄像头/燃气与水阀/保险柜仍被拦截)
-claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp serve --enable-control
+# 普通设备可控,锁/摄像头/燃气阀还是拦着
+mijia-home-mcp serve --enable-control
 
-# 只允许控制名单内设备(glob 匹配设备名/did/model,可多次传入)
+# 白名单,glob 匹配设备名/did/model
 mijia-home-mcp serve --enable-control --allow "客厅*" --allow "*台灯*"
 
-# 黑名单优先于白名单
+# 黑名单优先
 mijia-home-mcp serve --enable-control --deny "*camera*"
-
-# 明确允许危险设备(不推荐)
-mijia-home-mcp serve --enable-control --allow-dangerous
 ```
 
-安全策略细则:
+几条规则,都是故意的:
 
-- **危险设备只接受精确放行**:`--allow "*"` 这类通配白名单会放行普通设备,但锁/摄像头/燃气与水阀/保险柜必须把**完整设备名或 did** 精确写进 `--allow`(或使用 `--allow-dangerous`)才可控制。
-- **`run_speaker_command` 按危险通道对待**:小爱语音指令可以触达全屋任意设备(包括门锁),会绕过设备白名单,因此默认拦截——需要把音箱名精确加入 `--allow` 或使用 `--allow-dangerous`。
-- **`run_scene` 不受设备白名单约束**:场景内容是你在米家 App 预定义的动作组合,开启控制后即可执行;不想让 AI 碰的动作不要做成手动场景。
-- 所有写操作(含被拒绝的尝试)都会追加到 `~/.config/mijia-home-mcp/audit.log`。
+- 危险设备(锁/摄像头/燃气与水阀/保险柜)不吃通配符。`--allow "*"` 放行不了门锁,必须把设备名或 did 完整写进 `--allow`,或者 `--allow-dangerous`。
+- `run_speaker_command` 是让小爱执行自然语言指令,等于能操作全屋任何设备,绕过白名单,所以按危险设备同样对待。纯播报用 `speaker_announce`,那个只出声音,按普通设备管。
+- `run_scene` 不看设备白名单——场景是你自己在米家 App 里定义的,内容管不着。不想让模型碰的操作别做成手动场景。
+- 所有写操作(包括被拒的)追加到 `~/.config/mijia-home-mcp/audit.log`。
 
-### 局域网部署(可选)
+## 局域网部署
 
 ```bash
-mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423
+mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423 --http-token 随机串
+claude mcp add --transport http mijia-home http://<host>:8423/mcp --header "Authorization: Bearer 随机串"
 ```
+
+不设 `--http-token` 就没有鉴权,同网段谁都能连,启动时会警告。别暴露公网。
+
+## 工具
+
+读(始终有):
+
+- `get_home_snapshot` — 全屋快照,可按 home/room 过滤,detail=full 给原始值和更新时间。30 秒内重复调用直接吃缓存(结果里带 `cached: true`)
+- `get_home_changes` — 距上次调用的变化 diff
+- `query_history` — 查本地事件历史,"今天门开过几次"这种。数据来自 watch 运行期间的记录,保留 30 天
+- `get_battery_report` — 电量普查,低的排前面
+- `get_device_statistics` — 耗电量/使用时长这类历史统计
+- `list_homes` / `list_devices` / `get_device_status` / `get_device_spec` / `list_scenes` / `list_consumables`
+- `auth_status` / `login` / `login_status` — 凭证过期时对话里就能重新扫码
+- `send_notification` — 见上文,配了通道才有
+
+控制(要 `--enable-control`):`set_device_property`、`run_device_action`、`run_scene`、`speaker_announce`、`run_speaker_command`。
+
+还有个 prompt `home_briefing`,生成一份全屋简报。
+
+## 命令行
+
+CLI 本身能单独用,不需要 MCP 客户端:
 
 ```bash
-claude mcp add --transport http mijia-home http://<host>:8423/mcp
+mijia-home-mcp doctor        # 自检
+mijia-home-mcp snapshot      # 全屋状态,--home/--room/--full/--json
+mijia-home-mcp devices
+mijia-home-mcp battery
+mijia-home-mcp say "下楼取快递"
+mijia-home-mcp watch         # 持续监控,变化实时打印
 ```
 
-局域网部署请配置 Bearer token:
-
-```bash
-mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423 --http-token 你的随机串
-```
-
-```bash
-claude mcp add --transport http mijia-home http://<host>:8423/mcp --header "Authorization: Bearer 你的随机串"
-```
-
-> ⚠️ 不设 `--http-token` 时 http 传输无鉴权,同网段任何人都能读取(开启控制时还能操作)你的米家设备;启动时会打印警告。无论是否设 token 都不要暴露公网。
-
-## 工具一览
-
-**读(始终可用):**
-
-| 工具 | 用途 |
-|---|---|
-| `get_home_snapshot` | 全屋状态快照(compact/full 两档,支持 home/room 过滤),附离线/低电量/故障提醒 |
-| `get_home_changes` | 与上次快照对比,返回变化列表 |
-| `get_battery_report` | 全屋电量普查,按电量升序,低电量置顶 |
-| `get_device_statistics` | 设备历史统计(耗电量/使用时长,时/日/周/月粒度) |
-| `list_homes` / `list_devices` | 家庭/房间/设备清单,支持过滤 |
-| `get_device_status` | 单设备详细状态(批量拉取) |
-| `get_device_spec` | 设备支持的属性/动作(名称、类型、范围、枚举值) |
-| `list_scenes` / `list_consumables` | 手动场景 / 耗材状态 |
-| `auth_status` / `login` / `login_status` | 认证状态与会话内扫码续期 |
-| `send_notification` | 统一推送到安装时配置的全部通知通道(配置了通道才出现) |
-
-另有 MCP prompt `home_briefing`:一键生成管家式全屋简报。
-
-**控制(需 `--enable-control`):**
-
-| 工具 | 用途 |
-|---|---|
-| `set_device_property` | 设置属性(开关/亮度/模式…) |
-| `run_device_action` | 执行动作(喂食/启动清扫…) |
-| `run_scene` | 运行米家手动场景 |
-| `speaker_announce` | 小爱音箱播报一句话(纯 TTS,无执行能力) |
-| `run_speaker_command` | 让小爱音箱执行自然语言指令(按危险通道门控) |
-
-## 终端直用(不需要 MCP 客户端)
-
-装好之后 CLI 本身就是个小工具箱:
-
-```bash
-mijia-home-mcp doctor              # 自检:认证/云端连通性/缓存
-mijia-home-mcp snapshot            # 全屋状态一屏看完(--home/--room/--full/--json)
-mijia-home-mcp devices             # 设备清单(名称/位置/model/did)
-mijia-home-mcp battery             # 电量普查,低电量置顶
-mijia-home-mcp watch --interval 60 # 持续监控变化,实时打印(Ctrl-C 退出)
-```
-
-`watch` 实测效果:
+watch 长这样:
 
 ```text
 [14:26:04] 基线已建立,开始监控…
 [14:26:38] Mijia Smart Tabletop Dishwasher S2: left-time 159 → 158
 ```
 
-### watch 通知:小爱播报 / 钉钉 / 飞书 / MeoW / webhook
-
-变化不只打印在终端,还可以推出去,通道可任意组合:
+加通知参数可以边监控边推送:
 
 ```bash
-# 小爱音箱播报(play-text 纯 TTS,不会触发指令执行)
-mijia-home-mcp watch --speak --speaker-name "Xiaomi Smart Speaker"
-
-# 钉钉机器人(安全设置选「自定义关键词」填 米家;或用加签)
-mijia-home-mcp watch --dingtalk "https://oapi.dingtalk.com/robot/send?access_token=xxx"
-mijia-home-mcp watch --dingtalk "https://oapi.dingtalk.com/robot/send?access_token=xxx" --dingtalk-secret SECxxx
-
-# 飞书自定义机器人
-mijia-home-mcp watch --feishu "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
-
-# MeoW(鸿蒙系统级推送,传注册的昵称即可)
-mijia-home-mcp watch --meow 你的MeoW昵称
-
-# 通用 webhook:完整 diff JSON POST 到你的服务
-mijia-home-mcp watch --webhook https://example.com/hook
-
-# 组合 + 噪音控制:只盯门锁和传感器,忽略倒计时属性,同时推三处
-mijia-home-mcp watch --speak --meow 昵称 --feishu https://... \
+mijia-home-mcp watch --speak --meow 昵称 \
   --only "门锁*" --only "*传感器*" --ignore left-time
 ```
 
-watch 的变化事件在钉钉/飞书里以**卡片**呈现(markdown 列表,逐条设备变化);`send_notification` 的手动消息为纯文本。MeoW 收到"米家提醒 + 一句话摘要";通用 webhook 收到完整 diff JSON(含 `text` 摘要字段):
+`--ignore left-time` 这种很有必要,不然洗碗机倒计时每分钟推一条。钉钉/飞书收到的是卡片(逐条变化列表),MeoW 收到一句话摘要,`--webhook` 收到完整 diff JSON(带 `text` 字段,接 Bark/ntfy 可以直接用)。watch 的变化同时会写进本地历史,供 `query_history` 查。
 
-```json
-{
-  "source": "mijia-home-mcp",
-  "title": "米家提醒",
-  "text": "客厅台灯的on从True变为False",
-  "change_count": 1,
-  "changes": [
-    {"type": "prop_changed", "device": "客厅台灯", "prop": "on", "from": true, "to": false}
-  ]
-}
-```
+## 环境变量
 
-单通道失败(音箱离线/网络抖动/机器人限流)只打日志,互不影响,也不中断监控。
+CLI 参数和环境变量等价,参数优先:
 
-### 让小爱说话
-
-独立的 `say` 命令,配合系统计划任务就是个极简提醒器;MCP 侧对应工具 `speaker_announce`(需 `--enable-control`,受普通设备门控,比 `run_speaker_command` 宽松,因为纯 TTS 无执行能力):
-
-```bash
-mijia-home-mcp say "下楼取快递" --speaker-name "Xiaomi Smart Speaker 2"
-```
-
-## 配置
-
-CLI 参数优先,也支持环境变量(适合写进 `.mcp.json` 的 `env`):
-
-| 环境变量 | 对应参数 |
+| 环境变量 | 说明 |
 |---|---|
-| `MIJIA_HOME_MCP_AUTH` | `--auth` 认证文件路径(默认 `~/.config/mijia-api/auth.json`,与 mijiaAPI 共用) |
-| `MIJIA_HOME_MCP_ENABLE_CONTROL` | `--enable-control`(`1`/`true` 开启) |
-| `MIJIA_HOME_MCP_ALLOW` | `--allow`(逗号分隔) |
-| `MIJIA_HOME_MCP_DENY` | `--deny`(逗号分隔) |
-| `MIJIA_HOME_MCP_ALLOW_DANGEROUS` | `--allow-dangerous` |
-| `MIJIA_HOME_MCP_STATE_DIR` | 状态目录(快照基线/审计日志,默认 `~/.config/mijia-home-mcp`) |
-| `MIJIA_HOME_MCP_SPEAKER` | 通知通道:小爱音箱名称,`auto` 用第一台 |
-| `MIJIA_HOME_MCP_MEOW` | 通知通道:MeoW 昵称或完整 URL |
-| `MIJIA_HOME_MCP_FEISHU` / `_FEISHU_SECRET` | 通知通道:飞书机器人 webhook 与签名密钥 |
-| `MIJIA_HOME_MCP_DINGTALK` / `_DINGTALK_SECRET` | 通知通道:钉钉机器人 webhook 与加签密钥 |
-| `MIJIA_HOME_MCP_WEBHOOK` | 通知通道:通用 webhook |
-| `MIJIA_HOME_MCP_HTTP_TOKEN` | http 传输的 Bearer token(`--http-token`) |
+| `MIJIA_HOME_MCP_AUTH` | 认证文件路径,默认 `~/.config/mijia-api/auth.json` |
+| `MIJIA_HOME_MCP_ENABLE_CONTROL` | `1`/`true` 开控制 |
+| `MIJIA_HOME_MCP_ALLOW` / `_DENY` | 白/黑名单,逗号分隔 |
+| `MIJIA_HOME_MCP_ALLOW_DANGEROUS` | 放行危险设备 |
+| `MIJIA_HOME_MCP_STATE_DIR` | 状态目录(diff 基线/历史/审计日志),默认 `~/.config/mijia-home-mcp` |
+| `MIJIA_HOME_MCP_SPEAKER` | 小爱音箱名,`auto` 用第一台 |
+| `MIJIA_HOME_MCP_MEOW` | MeoW 昵称或完整 URL |
+| `MIJIA_HOME_MCP_FEISHU` / `_FEISHU_SECRET` | 飞书 webhook / 签名密钥 |
+| `MIJIA_HOME_MCP_DINGTALK` / `_DINGTALK_SECRET` | 钉钉 webhook / 加签密钥 |
+| `MIJIA_HOME_MCP_WEBHOOK` | 通用 webhook |
+| `MIJIA_HOME_MCP_HTTP_TOKEN` | http 传输的 Bearer token |
 
-## 已知边界
+## 已知问题
 
-- 走小米云端接口(上游 mijia-api 逆向实现),状态读取有秒级延迟,无本地直连与事件推送;请控制轮询频率。
-- 凭证约一个月需重新扫码一次(`mijia-home-mcp login`,或对话里直接调 `login` 工具)。
-- 工具的 `readOnlyHint` 等注解只是提示;真正的安全边界在服务端(只读默认 + 白名单 + 危险设备拦截)。
-- 个别设备的规格页缺少中文 i18n 数据(常见于红外遥控类设备,如空调伴侣里的"空调"),上游 spec 解析会失败;这类设备会出现在快照的 `attention.spec_errors` 里,状态为空但不影响其他设备。
-- `get_home_changes` 的对比基线按 `home` 参数分开存储;跨口径调用(这次传 home、下次不传)各自维护基线。
+- 全部走小米云端(上游是逆向的接口),读状态有秒级延迟,没有推送,别把轮询间隔调太小。
+- 凭证大约一个月过期,重新扫码(`login` 命令或对话里调 `login` 工具)。
+- 红外类设备(比如空调伴侣里的"空调")的 spec 页面缺中文数据,上游解析会挂,这类设备在快照的 `attention.spec_errors` 里,状态拿不到,其他设备不受影响。
+- `get_home_changes` 的基线按 home 参数分开存,这次传 home 下次不传的话是两条独立的基线。
+- 工具上的 `readOnlyHint` 注解只是给客户端的提示,真正的门在服务端。
 
 ## 开发
 
@@ -293,8 +182,8 @@ uv venv && uv pip install -e ".[dev]"
 uv run pytest
 ```
 
-测试完全离线(FakeAPI + 磁盘 spec 缓存),不需要米家账号。
+测试全离线(假 API + 磁盘 spec 缓存),不需要米家账号。
 
-## 许可证
+## 许可
 
-[GPL-3.0-or-later](LICENSE)。依赖 [mijia-api](https://github.com/Do1e/mijia-api)(GPL-3.0,其 README 声明仅供学习交流、禁止商用),本项目同样仅供学习交流使用。
+GPL-3.0-or-later。上游 mijia-api 是 GPL-3.0 且声明仅供学习交流,本项目一样。

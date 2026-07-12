@@ -1,7 +1,5 @@
-"""测试夹具:不联网的 FakeAPI + 写入磁盘缓存的假 spec。
-
-get_device_info 优先读 cache_path 下的 {model}.json,
-所以把假 spec 写进 spec_cache_dir 即可完全离线。
+"""不联网的假 API。spec 走的是 get_device_info 的磁盘缓存:
+它优先读 cache_path 下的 {model}.json,把假 spec 写进去就不会发请求。
 """
 
 from __future__ import annotations

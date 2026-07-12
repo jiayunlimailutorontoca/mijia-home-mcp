@@ -1,4 +1,4 @@
-"""watch 的通知通道:小爱音箱 TTS 播报,以及钉钉/飞书/MeoW/通用 webhook。"""
+"""通知通道:小爱音箱 TTS,加钉钉/飞书/MeoW/通用 webhook 四种推送。"""
 
 from __future__ import annotations
 
@@ -28,11 +28,10 @@ def filter_changes(
     only: Optional[list[str]] = None,
     ignore: Optional[list[str]] = None,
 ) -> list[dict]:
-    """按 glob 过滤变化列表。
+    """only 留设备名命中的,ignore 扔设备名或属性名命中的。
 
-    only: 只保留设备名命中任一模式的变化。
-    ignore: 丢弃设备名或属性名命中任一模式的变化(用于压掉
-            left-time 这类倒计时噪音)。
+    ignore 主要用来压属性噪音——洗碗机的 left-time 每分钟变一次,
+    不扔掉的话音箱能把人念疯。
     """
     out = []
     for c in changes:
@@ -49,7 +48,7 @@ def filter_changes(
 
 
 def format_changes_text(changes: list[dict], limit: int = 5) -> str:
-    """把变化列表压成一句适合口播/推送的中文。"""
+    """压成一句能口播的话。"""
     parts = []
     for c in changes[:limit]:
         if c["type"] == "prop_changed":
@@ -61,11 +60,6 @@ def format_changes_text(changes: list[dict], limit: int = 5) -> str:
     if rest > 0:
         text += f";另有{rest}项变化"
     return text
-
-
-# ---------------- 推送 provider ----------------
-# 每个 provider 一个函数:输入 (标题, 文本, 完整 diff),自行组织请求体。
-# 抛出的异常由调用方(watch 循环)捕获降级,不中断监控。
 
 
 def _post_json(url: str, payload: dict, check_body: bool = False) -> None:
@@ -81,7 +75,7 @@ def _post_json(url: str, payload: dict, check_body: bool = False) -> None:
             body = resp.json()
         except ValueError:
             return
-        # 钉钉/飞书 HTTP 200 但业务失败时 errcode/code 非 0
+        # 钉钉和飞书都是 HTTP 200 + 响应体里的 errcode 报业务错,坑
         code = body.get("errcode", body.get("code", 0))
         if code not in (0, 200, None):
             raise RuntimeError(
@@ -90,7 +84,7 @@ def _post_json(url: str, payload: dict, check_body: bool = False) -> None:
 
 
 def _changes_markdown_lines(changes: list[dict], limit: int = 10) -> list[str]:
-    """把变化列表转成 markdown 列表行(钉钉/飞书卡片共用)。"""
+    # 钉钉和飞书的卡片都吃 markdown,共用一份
     lines = []
     for c in changes[:limit]:
         if c["type"] == "prop_changed":
@@ -121,10 +115,10 @@ def send_dingtalk(
     secret: Optional[str] = None,
     changes: Optional[list[dict]] = None,
 ) -> None:
-    """钉钉自定义机器人。有 changes 时发 markdown 卡片,否则发 text。
+    """钉钉机器人。带 changes 发 markdown 卡片,不带发纯文本。
 
-    机器人安全设置用「自定义关键词」时,把关键词设为「米家」即可
-    (标题固定含「米家提醒」);用「加签」时传 secret。
+    机器人安全设置选"自定义关键词"的话填「米家」就能过
+    (标题固定带"米家提醒");选加签就传 secret。
     """
     url = _dingtalk_sign_url(webhook_url, secret) if secret else webhook_url
     if changes:
@@ -145,10 +139,10 @@ def send_feishu(
     secret: Optional[str] = None,
     changes: Optional[list[dict]] = None,
 ) -> None:
-    """飞书自定义机器人。有 changes 时发 interactive 卡片,否则发 text。
+    """飞书机器人。带 changes 发 interactive 卡片,不带发纯文本。
 
-    飞书加签与钉钉算法不同:以 timestamp+"\\n"+secret 为 HMAC 密钥、
-    空串为消息体计算 SHA256,签名放请求体的 timestamp/sign 字段。
+    注意飞书的加签跟钉钉不是一个算法:这边是拿 timestamp+secret
+    当 HMAC 密钥、消息体为空串,签名放请求体里而不是 URL 上。
     """
     if changes:
         payload: dict[str, Any] = {
@@ -183,10 +177,7 @@ def send_feishu(
 
 
 def send_meow(nickname_or_url: str, title: str, text: str) -> None:
-    """MeoW(鸿蒙消息推送, api.chuckfang.com)。
-
-    参数可以是 MeoW 昵称,也可以是完整 URL(自建/指定协议时)。
-    """
+    """MeoW 鸿蒙推送。传昵称就打官方 api.chuckfang.com,传 URL 就直接用。"""
     target = nickname_or_url
     if not target.startswith(("http://", "https://")):
         target = f"https://api.chuckfang.com/{urllib.parse.quote(target)}"
@@ -194,12 +185,12 @@ def send_meow(nickname_or_url: str, title: str, text: str) -> None:
 
 
 def send_generic(url: str, title: str, text: str, diff: dict) -> None:
-    """通用 webhook:POST 完整 diff JSON,附 title/text 摘要字段。"""
+    """通用 webhook,POST 完整 diff。text 字段是现成摘要,接 Bark/ntfy 直接用。"""
     _post_json(url, {"source": "mijia-home-mcp", "title": title, "text": text, **diff})
 
 
 class Pusher:
-    """聚合多个推送通道;单通道失败互不影响,错误列表返回给调用方打印。"""
+    """把配置的通道都推一遍,谁挂了记谁的错,互相不挡路。"""
 
     def __init__(
         self,
@@ -238,24 +229,24 @@ class Pusher:
                 send_dingtalk(
                     self.dingtalk, title, text, self.dingtalk_secret, changes=changes
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(f"钉钉: {exc}")
         if self.feishu:
             try:
                 send_feishu(
                     self.feishu, title, text, self.feishu_secret, changes=changes
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(f"飞书: {exc}")
         if self.meow:
             try:
                 send_meow(self.meow, title, text)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(f"MeoW: {exc}")
         if self.webhook:
             try:
                 send_generic(self.webhook, title, text, diff)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(f"webhook: {exc}")
         return errors
 

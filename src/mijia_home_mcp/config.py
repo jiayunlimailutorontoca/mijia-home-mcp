@@ -1,4 +1,4 @@
-"""运行配置:CLI 参数 + 环境变量,读写路径约定。"""
+"""配置。CLI 参数和 MIJIA_HOME_MCP_* 环境变量,前者优先。"""
 
 from __future__ import annotations
 
@@ -31,8 +31,6 @@ def _env_list(name: str) -> list[str]:
 
 @dataclass
 class Settings:
-    """服务运行配置。CLI 参数优先于环境变量。"""
-
     auth_path: Path = DEFAULT_AUTH_PATH
     state_dir: Path = DEFAULT_STATE_DIR
     enable_control: bool = False

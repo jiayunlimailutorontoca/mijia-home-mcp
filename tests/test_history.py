@@ -1,4 +1,4 @@
-"""事件历史:落盘、按天分文件、查询过滤、保留期清理。"""
+"""事件历史的落盘和查询。"""
 
 import json
 from datetime import datetime, timedelta

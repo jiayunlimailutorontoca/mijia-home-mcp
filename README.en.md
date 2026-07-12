@@ -2,93 +2,90 @@
 
 [中文](README.md) | English
 
-Whole-home state snapshot MCP server for Xiaomi Home (Mijia) — **read-only by default, see your entire home in one call**.
+MCP server for Xiaomi Home. The itch it scratches: asking Claude "what's going on at home" shouldn't take fifteen tool calls.
 
-Lets Claude / Cursor / any MCP client safely "watch your home": a single `get_home_snapshot` tool fetches all device states concurrently and returns a structured `home → room → device → humanized state` result; `get_home_changes` answers "what changed since last time". Control abilities (switches / properties / scenes) are off by default and gated by allowlists and a dangerous-device policy when enabled.
+`get_home_snapshot` pulls every device state in one call (batched API, ~9 s for 65 devices), grouped by home/room, enum values translated to labels, offline and low-battery devices surfaced separately. `get_home_changes` tells you what changed since you last asked.
 
-Built on [Do1e/mijia-api](https://github.com/Do1e/mijia-api) (GPL-3.0), sharing its login credentials (scan the QR code once, stays valid for about a month).
+Read-only by default. Control tools only register with `--enable-control`, and locks / cameras / gas valves get an extra gate on top — I don't trust a model with those.
 
-## Why another Mijia MCP
+Auth goes through [Do1e/mijia-api](https://github.com/Do1e/mijia-api) and shares its credential file (`~/.config/mijia-api/auth.json`). One QR scan lasts about a month.
 
-| | Typical Mijia MCP | mijia-home-mcp |
-|---|---|---|
-| "What's going on at home?" | N+1 per-device queries | one `get_home_snapshot` call, batched & concurrent (65 devices in ~9 s) |
-| Change awareness | none | `get_home_changes` diff + 30-day local event history (`query_history`) |
-| Safety model | full control out of the box | **read-only by default**; control requires `--enable-control` + allowlist; locks/cameras/gas valves blocked unless explicitly released; every write audited |
-| Output | raw siid/piid passthrough | humanized (enums → labels, booleans → on/off), offline/low-battery/fault devices highlighted |
-| Deployment | clone + venv, Unix-first | one `uvx` line straight from GitHub, first-class Windows support |
+## Install
 
-## Quick start
-
-1. Log in (a QR code prints in the terminal; scan with the Mi Home app):
+No clone needed:
 
 ```bash
+# scan the QR code printed in the terminal
 uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp login
-```
 
-2. Add to Claude Code (read-only):
-
-```bash
 claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp serve
 ```
 
-3. Ask "what's happening at home?" — the model calls `get_home_snapshot`.
+Then just ask "what's happening at home".
 
-### Configure notification channels at install time
+## Notification channels
 
-Declare channels in `.mcp.json` env; a `send_notification` tool then appears and pushes to **all configured channels in one call** (Xiaomi speaker TTS + DingTalk + Feishu/Lark + MeoW + generic webhook):
+Configure channels in env and a `send_notification` tool appears, pushing to all of them in one call (the tool doesn't exist if nothing is configured):
 
 ```json
-{
-  "mcpServers": {
-    "mijia-home": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp", "mijia-home-mcp", "serve"],
-      "env": {
-        "MIJIA_HOME_MCP_SPEAKER": "auto",
-        "MIJIA_HOME_MCP_FEISHU": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
-        "MIJIA_HOME_MCP_DINGTALK": "https://oapi.dingtalk.com/robot/send?access_token=xxx"
-      }
-    }
-  }
+"env": {
+  "MIJIA_HOME_MCP_SPEAKER": "auto",
+  "MIJIA_HOME_MCP_FEISHU": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+  "MIJIA_HOME_MCP_DINGTALK": "https://oapi.dingtalk.com/robot/send?access_token=xxx"
 }
 ```
 
+Channels: Xiaomi speaker TTS, DingTalk bot (keyword or signed), Feishu/Lark bot (keyword or signed), MeoW (HarmonyOS push), generic webhook. Results are reported per channel; one failing doesn't block the rest.
+
+## Enabling control
+
+```bash
+mijia-home-mcp serve --enable-control --allow "living room*" --deny "*camera*"
+```
+
+The rules, all deliberate:
+
+- Dangerous devices (locks, cameras, gas/water valves, safes) don't match wildcards. `--allow "*"` won't unlock the door lock — you need the exact device name or did in `--allow`, or `--allow-dangerous`.
+- `run_speaker_command` hands a natural-language command to the speaker, which can reach any device in the house and bypass the allowlist entirely. So it's gated like a dangerous device. For plain TTS use `speaker_announce`, which only makes sound and is gated as a normal device.
+- `run_scene` ignores the device allowlist — scenes are whatever you defined in the Mi Home app. Don't make a manual scene out of anything you wouldn't want a model to trigger.
+- Every write, including denied ones, is appended to `~/.config/mijia-home-mcp/audit.log`.
+
+## LAN deployment
+
+```bash
+mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423 --http-token <random>
+claude mcp add --transport http mijia-home http://<host>:8423/mcp --header "Authorization: Bearer <random>"
+```
+
+Without `--http-token` there is no auth and a warning is printed at startup. Don't expose it to the internet either way.
+
 ## Tools
 
-**Read (always available):** `get_home_snapshot` (compact/full, home/room filter, 30 s cache), `get_home_changes`, `query_history` (30-day local event log), `get_battery_report`, `get_device_statistics`, `list_homes`, `list_devices`, `get_device_status`, `get_device_spec`, `list_scenes`, `list_consumables`, `auth_status` / `login` / `login_status`, plus `send_notification` when channels are configured and a `home_briefing` prompt.
+Read (always on): `get_home_snapshot` (home/room filter, compact/full, 30 s cache), `get_home_changes`, `query_history` (local 30-day event log, populated while `watch` runs), `get_battery_report`, `get_device_statistics`, `list_homes` / `list_devices` / `get_device_status` / `get_device_spec` / `list_scenes` / `list_consumables`, `auth_status` / `login` / `login_status`, `send_notification` (when channels configured). Plus a `home_briefing` prompt.
 
-**Control (requires `--enable-control`):** `set_device_property`, `run_device_action`, `run_scene`, `speaker_announce` (pure TTS), `run_speaker_command` (voice-command passthrough, gated as dangerous since it can reach any device).
+Control (with `--enable-control`): `set_device_property`, `run_device_action`, `run_scene`, `speaker_announce`, `run_speaker_command`.
 
-Safety details: dangerous devices (locks / cameras / gas & water valves / safes) require the exact device name or did in `--allow` (wildcards don't count) or `--allow-dangerous`; all writes — including denied attempts — are appended to `~/.config/mijia-home-mcp/audit.log`.
+## CLI
 
-## Terminal usage (no MCP client needed)
-
-```bash
-mijia-home-mcp doctor        # self-check: auth / cloud connectivity / caches
-mijia-home-mcp snapshot      # whole home at a glance (--home/--room/--full/--json)
-mijia-home-mcp devices       # device list
-mijia-home-mcp battery       # battery census, lowest first
-mijia-home-mcp say "dinner"  # make the Xiaomi speaker talk
-mijia-home-mcp watch --speak --meow nick --ignore left-time   # live monitor + notify
-```
-
-`watch` records every change into a local 30-day JSONL history, which powers `query_history` ("how many times did the door open today?").
-
-## HTTP transport (LAN)
+Works standalone, no MCP client required:
 
 ```bash
-mijia-home-mcp serve --transport http --host 0.0.0.0 --port 8423 --http-token <random-string>
-claude mcp add --transport http mijia-home http://<host>:8423/mcp --header "Authorization: Bearer <random-string>"
+mijia-home-mcp doctor        # auth / connectivity self-check
+mijia-home-mcp snapshot      # whole home at a glance
+mijia-home-mcp devices
+mijia-home-mcp battery
+mijia-home-mcp say "dinner is ready"
+mijia-home-mcp watch --speak --only "door*" --ignore left-time
 ```
 
-Without `--http-token` the HTTP transport has no auth (a warning is printed). Never expose it to the public internet.
+`watch` polls, prints changes, optionally pushes them (speaker / DingTalk card / Feishu card / MeoW / webhook), and records everything into the local history that `query_history` reads. `--ignore left-time` matters — a running dishwasher counts down every minute.
 
 ## Known limits
 
-- Goes through Xiaomi's cloud API (reverse-engineered upstream): second-level latency, no local push events — keep polling intervals sane.
-- Credentials need a QR re-scan roughly monthly (`mijia-home-mcp login`, or the `login` tool in-chat).
-- Tool annotations like `readOnlyHint` are hints; the real security boundary is server-side (read-only default + allowlists + dangerous-device gate).
+- Everything goes through Xiaomi's cloud (reverse-engineered upstream). Second-ish latency, no push events, keep poll intervals sane.
+- Credentials expire after roughly a month; re-scan with `login`.
+- IR-based devices (e.g. the "AC" behind an AC partner) have broken spec pages upstream; they show up under `attention.spec_errors` with no state. Other devices are unaffected.
+- `readOnlyHint` annotations are hints for clients; the actual enforcement is server-side.
 
 ## Development
 
@@ -99,4 +96,4 @@ uv run pytest   # fully offline, no Xiaomi account needed
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). Depends on [mijia-api](https://github.com/Do1e/mijia-api) (GPL-3.0, whose README declares non-commercial / learning use only); this project follows the same terms.
+GPL-3.0-or-later. Upstream mijia-api is GPL-3.0 and declares itself learning/non-commercial use only; same applies here.
