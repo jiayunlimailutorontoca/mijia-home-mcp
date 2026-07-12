@@ -55,6 +55,9 @@ class HomeClient:
         self.settings = settings
         self._cache: dict[str, tuple[float, Any]] = {}
         self._spec_memo: dict[str, dict] = {}
+        # 快照短缓存:对话里连续追问时避免重复 10 秒级全量拉取
+        self._snap_cache: dict[tuple, tuple[float, dict, dict]] = {}
+        self.snapshot_ttl_s = 30.0
 
     # ---------- 基础数据(带 TTL 缓存) ----------
 
@@ -68,6 +71,7 @@ class HomeClient:
 
     def invalidate_cache(self) -> None:
         self._cache.clear()
+        self._snap_cache.clear()
 
     def homes(self) -> list[dict]:
         return self._cached("homes", self.api.get_homes_list)
@@ -224,13 +228,25 @@ class HomeClient:
         detail: str = "compact",
         max_props_per_device: int = 8,
         room: Optional[str] = None,
+        force_fresh: bool = False,
     ) -> tuple[dict, dict]:
         """构建全屋快照。
 
         返回 (snapshot, raw_state):
         - snapshot: 给 LLM 的结构化结果(home→room→device→语义化状态)
         - raw_state: 用于 diff 持久化的原始值映射
+
+        30s 内相同口径的重复调用直接返回缓存(snapshot 附 cached=True),
+        连续追问不重复付出 10 秒级的全量拉取。
         """
+        cache_key = (home, detail, max_props_per_device, room)
+        if not force_fresh:
+            hit = self._snap_cache.get(cache_key)
+            if hit is not None and time.monotonic() - hit[0] < self.snapshot_ttl_s:
+                snapshot = dict(hit[1])
+                snapshot["cached"] = True
+                return snapshot, hit[2]
+
         t0 = time.monotonic()
         devices = self._filter_devices(home)
         if room:
@@ -364,6 +380,7 @@ class HomeClient:
             },
         }
         raw = {"ts": snapshot["ts"], "devices": raw_state}
+        self._snap_cache[cache_key] = (time.monotonic(), snapshot, raw)
         return snapshot, raw
 
     # ---------- 电量普查(v0.3.0) ----------

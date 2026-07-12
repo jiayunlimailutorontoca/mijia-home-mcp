@@ -184,7 +184,8 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         """
         client = ctx.ready_client()
         prev = client.load_last_raw(home)
-        snapshot, raw = client.build_snapshot(home, "compact", 8)
+        # diff 必须基于新鲜数据,绕过 30s 快照缓存
+        snapshot, raw = client.build_snapshot(home, "compact", 8, force_fresh=True)
         client.save_raw(home, raw)
         if prev is None:
             return {

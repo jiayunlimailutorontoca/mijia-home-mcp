@@ -149,6 +149,37 @@ def test_set_property_coercion_and_shared_device(fake_api, settings):
         client.set_property(dev, "no-such-prop", "1")
 
 
+def test_snapshot_short_cache(fake_api, settings):
+    """30s 内同口径重复调用命中缓存;force_fresh 与不同口径绕过缓存。"""
+    client = _client(fake_api, settings)
+    snap1, _ = client.build_snapshot()
+    assert "cached" not in snap1
+
+    fake_api.prop_values[("did_light", 2, 2)] = 33
+    snap2, _ = client.build_snapshot()  # 命中缓存,看不到新值
+    assert snap2.get("cached") is True
+
+    snap3, _ = client.build_snapshot(force_fresh=True)  # 强制新鲜
+    assert "cached" not in snap3
+    light = next(
+        d
+        for h in snap3["homes"]
+        for r in h["rooms"]
+        for d in r["devices"]
+        if d["name"] == "客厅台灯"
+    )
+    assert light["state"]["brightness"] == 33
+
+    # 不同口径(home 过滤)不共享缓存
+    snap4, _ = client.build_snapshot(home="我的家")
+    assert "cached" not in snap4
+
+    # invalidate 后重新拉取
+    client.invalidate_cache()
+    snap5, _ = client.build_snapshot()
+    assert "cached" not in snap5
+
+
 def test_filter_devices_by_home(fake_api, settings):
     client = _client(fake_api, settings)
     assert len(client._filter_devices("我的家")) == 7
