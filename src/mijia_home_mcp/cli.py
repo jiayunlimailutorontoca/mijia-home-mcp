@@ -79,6 +79,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_battery = sub.add_parser("battery", help="终端查看全屋电量普查")
     p_battery.add_argument("--auth", type=Path, default=None, help="认证文件路径")
 
+    p_say = sub.add_parser("say", help="让小爱音箱播报一句话(纯 TTS)")
+    p_say.add_argument("text", help="要播报的内容")
+    p_say.add_argument("--auth", type=Path, default=None, help="认证文件路径")
+    p_say.add_argument(
+        "--speaker-name", default=None, help="指定音箱名称;不传用找到的第一台"
+    )
+
     p_watch = sub.add_parser(
         "watch", help="持续监控全屋状态变化(轮询 diff,Ctrl-C 退出)"
     )
@@ -101,10 +108,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="指定播报用的小爱音箱名称;不传用找到的第一台",
     )
     p_watch.add_argument(
+        "--dingtalk",
+        default=None,
+        metavar="WEBHOOK_URL",
+        help="钉钉机器人 webhook 地址(安全设置建议自定义关键词「米家」,或配合 --dingtalk-secret 加签)",
+    )
+    p_watch.add_argument(
+        "--dingtalk-secret",
+        default=None,
+        metavar="SECRET",
+        help="钉钉机器人加签密钥(SEC 开头)",
+    )
+    p_watch.add_argument(
+        "--feishu",
+        default=None,
+        metavar="WEBHOOK_URL",
+        help="飞书自定义机器人 webhook 地址",
+    )
+    p_watch.add_argument(
+        "--meow",
+        default=None,
+        metavar="NICKNAME",
+        help="MeoW(鸿蒙推送)昵称,或完整 API URL",
+    )
+    p_watch.add_argument(
         "--webhook",
         default=None,
         metavar="URL",
-        help="有变化时把 diff JSON POST 到该 URL",
+        help="通用 webhook:有变化时把 diff JSON POST 到该 URL",
     )
     p_watch.add_argument(
         "--only",
@@ -331,10 +362,10 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     from datetime import datetime
 
     from .notify import (
+        Pusher,
         SpeakerNotifier,
         filter_changes,
         format_changes_text,
-        send_webhook,
     )
 
     client, _ = _make_client(args)
@@ -350,8 +381,15 @@ def _cmd_watch(args: argparse.Namespace) -> int:
         except ValueError as exc:
             print(f"播报不可用: {exc}", flush=True)
             return 1
-    if args.webhook:
-        print(f"变化将 POST 到 {args.webhook}", flush=True)
+    pusher = Pusher(
+        dingtalk=args.dingtalk,
+        dingtalk_secret=args.dingtalk_secret,
+        feishu=args.feishu,
+        meow=args.meow,
+        webhook=args.webhook,
+    )
+    if pusher.channels:
+        print(f"变化将推送到: {'、'.join(pusher.channels)}", flush=True)
 
     print(
         f"每 {interval}s 轮询一次,监控范围: {args.home or '全部家庭'}。Ctrl-C 退出。\n",
@@ -378,24 +416,14 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             if not diff["changes"]:
                 print(f"{ts} 无变化", flush=True)
                 continue
+            summary = format_changes_text(diff["changes"])
             if speaker is not None:
                 try:
-                    speaker.announce("米家提醒:" + format_changes_text(diff["changes"]))
+                    speaker.announce("米家提醒:" + summary)
                 except Exception as exc:  # noqa: BLE001 - 通知失败不中断监控
                     print(f"{ts} 播报失败: {exc}", flush=True)
-            if args.webhook:
-                try:
-                    send_webhook(
-                        args.webhook,
-                        {
-                            "source": "mijia-home-mcp",
-                            "home": args.home,
-                            **diff,
-                            "text": format_changes_text(diff["changes"]),
-                        },
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    print(f"{ts} webhook 失败: {exc}", flush=True)
+            for err in pusher.push("米家提醒", summary, {"home": args.home, **diff}):
+                print(f"{ts} 推送失败 {err}", flush=True)
             for c in diff["changes"]:
                 if c["type"] == "prop_changed":
                     print(
@@ -412,6 +440,20 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\n已停止监控。", flush=True)
         return 0
+
+
+def _cmd_say(args: argparse.Namespace) -> int:
+    from .notify import SpeakerNotifier
+
+    client, _ = _make_client(args)
+    try:
+        notifier = SpeakerNotifier(client, args.speaker_name)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    notifier.announce(args.text)
+    print(f"已通过「{notifier.name}」播报: {args.text}")
+    return 0
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
@@ -461,6 +503,7 @@ def main(argv: list[str] | None = None) -> int:
         "devices": _cmd_devices,
         "doctor": _cmd_doctor,
         "battery": _cmd_battery,
+        "say": _cmd_say,
         "watch": _cmd_watch,
         "serve": _cmd_serve,
     }

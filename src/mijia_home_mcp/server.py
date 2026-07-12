@@ -626,6 +626,39 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
 
         @mcp.tool(tags={"control"}, annotations=WRITE_SAFE)
         @_friendly_errors
+        def speaker_announce(
+            text: str, speaker_name: Optional[str] = None
+        ) -> str:
+            """让小爱音箱播报一句话(play-text 纯 TTS)。
+
+            只出声音,不会触发任何指令执行,受普通设备控制策略约束
+            (不像 run_speaker_command 那样按危险通道对待)。
+
+            Args:
+                text: 要播报的内容。
+                speaker_name: 可选,指定音箱名称;不传用找到的第一台。
+            """
+            from .notify import SpeakerNotifier
+
+            client = ctx.ready_client()
+            try:
+                notifier = SpeakerNotifier(client, speaker_name)
+            except ValueError as exc:
+                raise ToolError(str(exc)) from exc
+            args = {"text": text}
+            try:
+                ctx.guard.check_device(notifier.speaker)
+                notifier.announce(text)
+            except Exception as exc:
+                ctx.guard.audit(
+                    "speaker_announce", notifier.name, args, False, str(exc)
+                )
+                raise
+            ctx.guard.audit("speaker_announce", notifier.name, args, True)
+            return f"已通过「{notifier.name}」播报: {text}"
+
+        @mcp.tool(tags={"control"}, annotations=WRITE_SAFE)
+        @_friendly_errors
         def run_speaker_command(
             prompt: str, speaker_name: Optional[str] = None, quiet: bool = True
         ) -> str:

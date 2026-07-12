@@ -1,8 +1,13 @@
-"""watch 的通知通道:小爱音箱 TTS 播报与 webhook POST。"""
+"""watch 的通知通道:小爱音箱 TTS 播报,以及钉钉/飞书/MeoW/通用 webhook。"""
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
+import time
+import urllib.parse
 from fnmatch import fnmatch
 from typing import Any, Optional
 
@@ -44,7 +49,7 @@ def filter_changes(
 
 
 def format_changes_text(changes: list[dict], limit: int = 5) -> str:
-    """把变化列表压成一句适合口播的中文。"""
+    """把变化列表压成一句适合口播/推送的中文。"""
     parts = []
     for c in changes[:limit]:
         if c["type"] == "prop_changed":
@@ -58,8 +63,12 @@ def format_changes_text(changes: list[dict], limit: int = 5) -> str:
     return text
 
 
-def send_webhook(url: str, payload: dict[str, Any]) -> None:
-    """POST JSON 到 webhook。抛出 requests 异常由调用方决定如何降级。"""
+# ---------------- 推送 provider ----------------
+# 每个 provider 一个函数:输入 (标题, 文本, 完整 diff),自行组织请求体。
+# 抛出的异常由调用方(watch 循环)捕获降级,不中断监控。
+
+
+def _post_json(url: str, payload: dict, check_body: bool = False) -> None:
     resp = requests.post(
         url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -67,6 +76,122 @@ def send_webhook(url: str, payload: dict[str, Any]) -> None:
         timeout=WEBHOOK_TIMEOUT_S,
     )
     resp.raise_for_status()
+    if check_body:
+        try:
+            body = resp.json()
+        except ValueError:
+            return
+        # 钉钉/飞书 HTTP 200 但业务失败时 errcode/code 非 0
+        code = body.get("errcode", body.get("code", 0))
+        if code not in (0, 200, None):
+            raise RuntimeError(
+                f"推送服务返回业务错误: {json.dumps(body, ensure_ascii=False)[:200]}"
+            )
+
+
+def send_dingtalk(
+    webhook_url: str, title: str, text: str, secret: Optional[str] = None
+) -> None:
+    """钉钉自定义机器人(text 消息)。
+
+    机器人安全设置用「自定义关键词」时,把关键词设为「米家」即可
+    (标题固定含「米家提醒」);用「加签」时传 secret。
+    """
+    url = webhook_url
+    if secret:
+        ts = str(round(time.time() * 1000))
+        sign_str = f"{ts}\n{secret}"
+        sign = base64.b64encode(
+            hmac.new(
+                secret.encode("utf-8"), sign_str.encode("utf-8"), hashlib.sha256
+            ).digest()
+        )
+        url += f"&timestamp={ts}&sign={urllib.parse.quote_plus(sign)}"
+    _post_json(
+        url,
+        {"msgtype": "text", "text": {"content": f"{title}\n{text}"}},
+        check_body=True,
+    )
+
+
+def send_feishu(webhook_url: str, title: str, text: str) -> None:
+    """飞书自定义机器人(text 消息)。"""
+    _post_json(
+        webhook_url,
+        {"msg_type": "text", "content": {"text": f"{title}\n{text}"}},
+        check_body=True,
+    )
+
+
+def send_meow(nickname_or_url: str, title: str, text: str) -> None:
+    """MeoW(鸿蒙消息推送, api.chuckfang.com)。
+
+    参数可以是 MeoW 昵称,也可以是完整 URL(自建/指定协议时)。
+    """
+    target = nickname_or_url
+    if not target.startswith(("http://", "https://")):
+        target = f"https://api.chuckfang.com/{urllib.parse.quote(target)}"
+    _post_json(target, {"title": title, "msg": text}, check_body=True)
+
+
+def send_generic(url: str, title: str, text: str, diff: dict) -> None:
+    """通用 webhook:POST 完整 diff JSON,附 title/text 摘要字段。"""
+    _post_json(url, {"source": "mijia-home-mcp", "title": title, "text": text, **diff})
+
+
+class Pusher:
+    """聚合多个推送通道;单通道失败互不影响,错误列表返回给调用方打印。"""
+
+    def __init__(
+        self,
+        dingtalk: Optional[str] = None,
+        dingtalk_secret: Optional[str] = None,
+        feishu: Optional[str] = None,
+        meow: Optional[str] = None,
+        webhook: Optional[str] = None,
+    ):
+        self.dingtalk = dingtalk
+        self.dingtalk_secret = dingtalk_secret
+        self.feishu = feishu
+        self.meow = meow
+        self.webhook = webhook
+
+    @property
+    def channels(self) -> list[str]:
+        out = []
+        if self.dingtalk:
+            out.append("钉钉")
+        if self.feishu:
+            out.append("飞书")
+        if self.meow:
+            out.append("MeoW")
+        if self.webhook:
+            out.append("webhook")
+        return out
+
+    def push(self, title: str, text: str, diff: dict) -> list[str]:
+        errors = []
+        if self.dingtalk:
+            try:
+                send_dingtalk(self.dingtalk, title, text, self.dingtalk_secret)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"钉钉: {exc}")
+        if self.feishu:
+            try:
+                send_feishu(self.feishu, title, text)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"飞书: {exc}")
+        if self.meow:
+            try:
+                send_meow(self.meow, title, text)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"MeoW: {exc}")
+        if self.webhook:
+            try:
+                send_generic(self.webhook, title, text, diff)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"webhook: {exc}")
+        return errors
 
 
 class SpeakerNotifier:

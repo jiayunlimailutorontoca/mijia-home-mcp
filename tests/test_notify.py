@@ -1,12 +1,20 @@
-"""notify 模块测试:变化过滤、口播文案、音箱选择(离线)。"""
+"""notify 模块测试:变化过滤、口播文案、音箱选择、三家推送格式(离线)。"""
+
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from mijia_home_mcp.client import HomeClient
 from mijia_home_mcp.notify import (
+    Pusher,
     SpeakerNotifier,
     filter_changes,
     format_changes_text,
+    send_dingtalk,
+    send_feishu,
+    send_meow,
 )
 
 CHANGES = [
@@ -58,3 +66,78 @@ def test_speaker_notifier_unknown_name(fake_api, settings):
     client = HomeClient(fake_api, settings)
     with pytest.raises(ValueError, match="未找到"):
         SpeakerNotifier(client, "不存在的音箱")
+
+
+# ---------------- 推送 provider(本地 HTTP 接收端) ----------------
+
+
+@pytest.fixture
+def http_sink():
+    """本地 HTTP 服务,记录收到的 (path, query, json_body)。"""
+    received = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            path, _, query = self.path.partition("?")
+            received.append((path, query, json.loads(body) if body else None))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"errcode":0,"code":0,"status":200}')
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}", received
+    server.shutdown()
+
+
+def test_send_dingtalk_format(http_sink):
+    base, received = http_sink
+    send_dingtalk(f"{base}/robot/send?access_token=tk", "米家提醒", "灯开了")
+    path, query, body = received[0]
+    assert body == {"msgtype": "text", "text": {"content": "米家提醒\n灯开了"}}
+
+
+def test_send_dingtalk_signed(http_sink):
+    base, received = http_sink
+    send_dingtalk(
+        f"{base}/robot/send?access_token=tk", "米家提醒", "灯开了", secret="SECxxx"
+    )
+    _, query, _ = received[0]
+    assert "timestamp=" in query and "sign=" in query
+
+
+def test_send_feishu_format(http_sink):
+    base, received = http_sink
+    send_feishu(f"{base}/open-apis/bot/v2/hook/xxx", "米家提醒", "灯开了")
+    _, _, body = received[0]
+    assert body == {"msg_type": "text", "content": {"text": "米家提醒\n灯开了"}}
+
+
+def test_send_meow_nickname_and_url(http_sink):
+    base, received = http_sink
+    # 完整 URL 直接用
+    send_meow(f"{base}/mynick", "米家提醒", "灯开了")
+    path, _, body = received[0]
+    assert path == "/mynick"
+    assert body == {"title": "米家提醒", "msg": "灯开了"}
+
+
+def test_pusher_aggregates_and_isolates_failures(http_sink):
+    base, received = http_sink
+    pusher = Pusher(
+        feishu=f"{base}/feishu",
+        meow=f"{base}/meow",
+        # 指向不存在的端口 → 该通道失败但不影响其他通道
+        webhook="http://127.0.0.1:1/dead",
+    )
+    assert pusher.channels == ["飞书", "MeoW", "webhook"]
+    errors = pusher.push("米家提醒", "灯开了", {"changes": []})
+    assert len(errors) == 1 and errors[0].startswith("webhook")
+    assert len(received) == 2, "飞书与 MeoW 应各收到一条"
