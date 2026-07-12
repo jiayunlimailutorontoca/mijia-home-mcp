@@ -23,6 +23,8 @@ claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutoro
 
 Then just ask "what's happening at home".
 
+Multiple homes on one account? Pin a default so tools don't pull everything: `"env": {"MIJIA_HOME_MCP_HOME_NAME": "My Home"}` (or `serve --home "My Home"`). Explicit `home` arguments still override it.
+
 ### Updating
 
 uvx caches git builds, so your local copy won't follow the repo automatically. Refresh manually:

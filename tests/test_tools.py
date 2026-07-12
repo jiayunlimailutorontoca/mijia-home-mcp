@@ -254,6 +254,32 @@ def test_send_notification_multi_channel_isolation(fake_api, settings):
     assert any("小爱音箱" in k and v == "ok" for k, v in result.items())
 
 
+def test_default_home_scopes_tools(fake_api, settings):
+    """配置了默认家庭后,不传 home 的工具只看那个家。"""
+    settings.home = "我的家"
+    mcp = build_server(settings, api=fake_api)
+    snap = _run(_call(mcp, "get_home_snapshot"))
+    assert [h["name"] for h in snap["homes"]] == ["我的家"]
+    assert snap["stats"]["devices_total"] == 7  # 共享设备那台不在
+
+    devices = _run(_call(mcp, "list_devices"))
+    assert all(d["home"] == "我的家" for d in devices)
+
+    report = _run(_call(mcp, "get_battery_report"))
+    assert report["count"] == 2
+
+    # 显式传 home 覆盖默认
+    snap_shared = _run(_call(mcp, "get_home_snapshot", {"home": "共享设备"}))
+    assert snap_shared["stats"]["devices_total"] == 1
+
+
+def test_default_home_in_auth_status(fake_api, settings):
+    settings.home = "我的家"
+    mcp = build_server(settings, api=fake_api)
+    info = _run(_call(mcp, "auth_status"))
+    assert info["default_home"] == "我的家"
+
+
 def test_auth_status_without_login(settings):
     mcp = build_server(settings)  # 不注入 api,认证文件不存在
     data = _run(_call(mcp, "auth_status"))

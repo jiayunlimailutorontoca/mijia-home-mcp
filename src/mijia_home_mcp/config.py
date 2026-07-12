@@ -39,6 +39,8 @@ class Settings:
     allow_dangerous: bool = False
     snapshot_chunk_size: int = 20
     spec_workers: int = 4
+    # 默认家庭。多家庭账号在这锁定一个,所有工具不传 home 时都用它
+    home: str | None = None
     # 通知通道(安装 MCP 时配置,send_notification 工具统一推送)
     dingtalk: str | None = None
     dingtalk_secret: str | None = None
@@ -81,6 +83,7 @@ class Settings:
         settings.allow_dangerous = _env_bool("ALLOW_DANGEROUS")
         settings.allow = _env_list("ALLOW")
         settings.deny = _env_list("DENY")
+        settings.home = _env("HOME_NAME")  # 不叫 HOME,和系统变量撞名
         settings.dingtalk = _env("DINGTALK")
         settings.dingtalk_secret = _env("DINGTALK_SECRET")
         settings.feishu = _env("FEISHU")

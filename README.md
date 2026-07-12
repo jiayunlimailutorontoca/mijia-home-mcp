@@ -42,6 +42,16 @@ claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutoro
 
 装完问一句"家里现在什么情况"就能用了。
 
+### 多家庭账号
+
+账号下有多个家庭的话,默认所有工具都是全家庭一起拉,又慢又费 token。锁定一个:
+
+```json
+"env": { "MIJIA_HOME_MCP_HOME_NAME": "我的家" }
+```
+
+或 `serve --home 我的家`。锁定后所有工具不传 `home` 参数时只看这个家;对话里显式说"看看另一个家"仍然可以覆盖。家庭名可以用 `list_homes` 或 `mijia-home-mcp devices` 确认。
+
 后面的示例统一简写成 `mijia-home-mcp ...`,实际替换成上面 `uvx --from git+...` 那串,或者 clone 之后 `uv run mijia-home-mcp ...`。
 
 ### 更新
@@ -183,6 +193,7 @@ CLI 参数和环境变量等价,参数优先:
 | `MIJIA_HOME_MCP_ALLOW` / `_DENY` | 白/黑名单,逗号分隔 |
 | `MIJIA_HOME_MCP_ALLOW_DANGEROUS` | 放行危险设备 |
 | `MIJIA_HOME_MCP_STATE_DIR` | 状态目录(diff 基线/历史/审计日志),默认 `~/.config/mijia-home-mcp` |
+| `MIJIA_HOME_MCP_HOME_NAME` | 默认家庭(`--home`),多家庭账号用 |
 | `MIJIA_HOME_MCP_SPEAKER` | 小爱音箱名,`auto` 用第一台 |
 | `MIJIA_HOME_MCP_MEOW` | MeoW 昵称或完整 URL |
 | `MIJIA_HOME_MCP_FEISHU` / `_FEISHU_SECRET` | 飞书 webhook / 签名密钥 |

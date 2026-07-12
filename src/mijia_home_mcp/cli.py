@@ -155,6 +155,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_serve = sub.add_parser("serve", help="启动 MCP server(默认 stdio)")
     p_serve.add_argument("--auth", type=Path, default=None, help="认证文件路径")
     p_serve.add_argument(
+        "--home",
+        default=None,
+        metavar="NAME",
+        help="默认家庭(名称或ID)。多家庭账号锁定一个,工具不传 home 时都用它",
+    )
+    p_serve.add_argument(
         "--enable-control",
         action="store_true",
         help="开启控制工具(设置属性/执行动作/运行场景);默认只读",
@@ -264,9 +270,9 @@ def _fmt_state(state: dict) -> str:
 def _cmd_snapshot(args: argparse.Namespace) -> int:
     import json
 
-    client, _ = _make_client(args)
+    client, settings = _make_client(args)
     snapshot, _raw = client.build_snapshot(
-        home=args.home,
+        home=args.home or settings.home,
         detail="full" if args.full else "compact",
         room=args.room,
     )
@@ -393,8 +399,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _cmd_battery(args: argparse.Namespace) -> int:
-    client, _ = _make_client(args)
-    report = client.battery_report()
+    client, settings = _make_client(args)
+    report = client.battery_report(home=settings.home)
     for row in report["devices"]:
         level = row["battery"]
         bar = "!" if isinstance(level, (int, float)) and level <= 20 else " "
@@ -417,6 +423,8 @@ def _cmd_watch(args: argparse.Namespace) -> int:
 
     client, settings = _make_client(args)
     history = EventHistory(settings.state_dir)
+    if args.home is None:
+        args.home = settings.home
     interval = max(15, args.interval)
     if interval != args.interval:
         print(f"(间隔已提升到最小值 {interval}s,保护云端接口)", flush=True)
@@ -523,7 +531,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         settings.deny = args.deny
     if args.allow_dangerous:
         settings.allow_dangerous = True
-    for channel in ("dingtalk", "dingtalk_secret", "feishu", "feishu_secret", "meow", "webhook", "speaker", "http_token"):
+    for channel in ("dingtalk", "dingtalk_secret", "feishu", "feishu_secret", "meow", "webhook", "speaker", "http_token", "home"):
         value = getattr(args, channel, None)
         if value is not None:
             setattr(settings, channel, value)

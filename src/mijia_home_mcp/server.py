@@ -155,6 +155,10 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         auth=auth,
     )
 
+    def _home_or_default(home: Optional[str]) -> Optional[str]:
+        # 多家庭账号可以在配置里锁一个默认家庭;工具显式传了以传的为准
+        return home if home is not None else settings.home
+
     # 读工具
 
     @mcp.tool(annotations=READ_ONLY)
@@ -172,14 +176,14 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         本工具不影响 get_home_changes 的对比基线。
 
         Args:
-            home: 可选,家庭名称或ID;不传则包含所有家庭(含共享设备)。
+            home: 可选,家庭名称或ID;不传用服务端配置的默认家庭,均未配置则包含所有家庭。
             room: 可选,房间名;只关心单个房间时用,更快更省 token。
             detail: compact 返回语义化精简状态;full 附带原始值/属性描述/更新时间/did。
             max_props_per_device: 每台设备最多读取的属性数,默认8(full 模式自动放宽到24)。
         """
         client = ctx.ready_client()
         snapshot, _raw = client.build_snapshot(
-            home, detail, max_props_per_device, room=room
+            _home_or_default(home), detail, max_props_per_device, room=room
         )
         return snapshot
 
@@ -194,9 +198,10 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         首次调用时没有基线,会先建立基线并说明。
 
         Args:
-            home: 可选,家庭名称或ID,须与上次快照的口径一致。
+            home: 可选,家庭名称或ID,须与上次快照的口径一致;不传用服务端默认家庭。
         """
         client = ctx.ready_client()
+        home = _home_or_default(home)
         prev = client.load_last_raw(home)
         # diff 必须基于新鲜数据,绕过 30s 快照缓存
         snapshot, raw = client.build_snapshot(home, "compact", 8, force_fresh=True)
@@ -283,12 +288,13 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         """列出设备(名称/did/model/在线状态/所属家庭房间),支持过滤。
 
         Args:
-            home: 按家庭名称或ID过滤。
+            home: 按家庭名称或ID过滤;不传用服务端默认家庭。
             room: 按房间名过滤(精确匹配)。
             name_contains: 设备名包含该子串(不区分大小写)。
             online_only: 只看在线设备。
         """
         client = ctx.ready_client()
+        home = _home_or_default(home)
         devices = client._filter_devices(home) if home else client.devices()
         out = []
         for dev in devices:
@@ -425,10 +431,12 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         """列出米家手动场景(名称/scene_id/所属家庭)。
 
         Args:
-            home: 可选,家庭名称或ID;不传则列出所有家庭的场景。
+            home: 可选,家庭名称或ID;不传用服务端默认家庭,均未配置则列所有。
         """
         client = ctx.ready_client()
-        scenes = client.api.get_scenes_list(_resolve_home_id(client, home))
+        scenes = client.api.get_scenes_list(
+            _resolve_home_id(client, _home_or_default(home))
+        )
         return [
             {
                 "name": s.get("name"),
@@ -444,21 +452,26 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         """列出耗材状态(滤芯/电池等),用于回答"哪些耗材该换了"。
 
         Args:
-            home: 可选,家庭名称或ID;不传则列出所有家庭的耗材。
+            home: 可选,家庭名称或ID;不传用服务端默认家庭,均未配置则列所有。
         """
         client = ctx.ready_client()
-        return client.api.get_consumable_items(_resolve_home_id(client, home))
+        return client.api.get_consumable_items(
+            _resolve_home_id(client, _home_or_default(home))
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     @_friendly_errors
-    def get_battery_report() -> dict:
+    def get_battery_report(home: Optional[str] = None) -> dict:
         """全屋电量普查:批量读取所有带电池的设备,按电量升序返回。
 
         回答"哪些设备该换电池了"用这个,比逐设备查询快得多。
         low 字段列出电量 ≤20% 的设备。
+
+        Args:
+            home: 可选,家庭名称或ID;不传用服务端默认家庭。
         """
         client = ctx.ready_client()
-        return client.battery_report()
+        return client.battery_report(home=_home_or_default(home))
 
     @mcp.tool(annotations=READ_ONLY)
     @_friendly_errors
@@ -566,6 +579,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
             "auth_path": str(settings.auth_path),
             "auth_file_exists": settings.auth_path.exists(),
             "control_enabled": settings.enable_control,
+            "default_home": settings.home,
         }
         if ctx.api is None:
             error = ctx.try_init_api()

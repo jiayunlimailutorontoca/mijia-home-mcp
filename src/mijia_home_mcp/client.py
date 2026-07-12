@@ -366,9 +366,9 @@ class HomeClient:
         self._snap_cache[cache_key] = (time.monotonic(), snapshot, raw)
         return snapshot, raw
 
-    def battery_report(self) -> dict:
+    def battery_report(self, home: Optional[str] = None) -> dict:
         """所有带 battery-level 的在线设备电量,低的排前面。"""
-        devices = [d for d in self.devices() if _is_online(d)]
+        devices = [d for d in self._filter_devices(home) if _is_online(d)]
         specs = self._prefetch_specs([d.get("model", "") for d in devices])
         requests: list[dict] = []
         meta: dict[tuple, dict] = {}
