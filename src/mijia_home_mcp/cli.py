@@ -79,6 +79,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_battery = sub.add_parser("battery", help="终端查看全屋电量普查")
     p_battery.add_argument("--auth", type=Path, default=None, help="认证文件路径")
 
+    p_watch = sub.add_parser(
+        "watch", help="持续监控全屋状态变化(轮询 diff,Ctrl-C 退出)"
+    )
+    p_watch.add_argument("--auth", type=Path, default=None, help="认证文件路径")
+    p_watch.add_argument("--home", default=None, help="只监控指定家庭")
+    p_watch.add_argument(
+        "--interval",
+        type=int,
+        default=60,
+        help="轮询间隔秒数,默认60;请勿设置过小以免触发云端限流",
+    )
+
     p_serve = sub.add_parser("serve", help="启动 MCP server(默认 stdio)")
     p_serve.add_argument("--auth", type=Path, default=None, help="认证文件路径")
     p_serve.add_argument(
@@ -284,6 +296,51 @@ def _cmd_battery(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_watch(args: argparse.Namespace) -> int:
+    import time as _time
+    from datetime import datetime
+
+    client, _ = _make_client(args)
+    interval = max(15, args.interval)
+    if interval != args.interval:
+        print(f"(间隔已提升到最小值 {interval}s,保护云端接口)", flush=True)
+    print(f"每 {interval}s 轮询一次,监控范围: {args.home or '全部家庭'}。Ctrl-C 退出。\n", flush=True)
+
+    _, prev = client.build_snapshot(home=args.home)
+    print(f"[{datetime.now():%H:%M:%S}] 基线已建立,开始监控…", flush=True)
+    try:
+        while True:
+            _time.sleep(interval)
+            client.invalidate_cache()
+            try:
+                _, cur = client.build_snapshot(home=args.home)
+            except Exception as exc:  # noqa: BLE001 - 单轮失败不退出
+                print(f"[{datetime.now():%H:%M:%S}] 本轮拉取失败: {exc}", flush=True)
+                continue
+            diff = client.diff_raw(prev, cur)
+            prev = cur
+            ts = f"[{datetime.now():%H:%M:%S}]"
+            if not diff["changes"]:
+                print(f"{ts} 无变化", flush=True)
+                continue
+            for c in diff["changes"]:
+                if c["type"] == "prop_changed":
+                    print(
+                        f"{ts} {c['device']}: {c['prop']} "
+                        f"{c['from']} → {c['to']}",
+                        flush=True,
+                    )
+                elif c["type"] == "went_offline":
+                    print(f"{ts} ✗ {c['device']} 离线了", flush=True)
+                elif c["type"] == "came_online":
+                    print(f"{ts} ✓ {c['device']} 上线了", flush=True)
+                else:
+                    print(f"{ts} {c['type']}: {c['device']}", flush=True)
+    except KeyboardInterrupt:
+        print("\n已停止监控。", flush=True)
+        return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     _setup_stderr_logging()
     settings = Settings.from_env()
@@ -331,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         "devices": _cmd_devices,
         "doctor": _cmd_doctor,
         "battery": _cmd_battery,
+        "watch": _cmd_watch,
         "serve": _cmd_serve,
     }
     if args.command is None:
