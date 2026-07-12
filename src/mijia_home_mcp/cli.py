@@ -375,6 +375,19 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     check("状态目录可写", True, str(settings.state_dir))
     specs = list(settings.spec_cache_dir.glob("*.json"))
     check("spec 缓存", True, f"{len(specs)} 个型号已缓存")
+
+    from . import __version__
+    from .update_check import check_latest
+
+    upd = check_latest(__version__)
+    if upd["status"] == "outdated":
+        check("版本", False, f"当前 v{__version__},最新 {upd['latest']}")
+        print(f"       更新: {upd['hint']}")
+    elif upd["status"] == "up_to_date":
+        check("版本", True, f"v{__version__} 已是最新")
+    else:
+        check("版本", True, f"v{__version__}(检查更新失败,跳过)")
+
     print("\n一切正常。启动 MCP: mijia-home-mcp serve")
     return 0
 

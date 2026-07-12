@@ -562,6 +562,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
     def auth_status() -> dict:
         """查看当前米家登录状态与认证文件路径,排查认证问题时先调这个。"""
         info: dict[str, Any] = {
+            "version": __version__,
             "auth_path": str(settings.auth_path),
             "auth_file_exists": settings.auth_path.exists(),
             "control_enabled": settings.enable_control,

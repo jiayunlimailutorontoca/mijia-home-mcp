@@ -23,6 +23,16 @@ claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutoro
 
 Then just ask "what's happening at home".
 
+### Updating
+
+uvx caches git builds, so your local copy won't follow the repo automatically. Refresh manually:
+
+```bash
+uvx --refresh --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp --version
+```
+
+then restart your MCP client. `doctor` also checks GitHub for a newer release. To pin a version instead, append `@v0.10.0` to the git URL. Bugfix releases show up under [Releases](https://github.com/jiayunlimailutorontoca/mijia-home-mcp/releases) — watch those if you want notifications.
+
 ## Notification channels
 
 Configure channels in env and a `send_notification` tool appears, pushing to all of them in one call (the tool doesn't exist if nothing is configured):

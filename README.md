@@ -44,6 +44,29 @@ claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutoro
 
 后面的示例统一简写成 `mijia-home-mcp ...`,实际替换成上面 `uvx --from git+...` 那串,或者 clone 之后 `uv run mijia-home-mcp ...`。
 
+### 更新
+
+uvx 会缓存 git 构建,仓库更新了你本地不会自动跟上。手动刷一下:
+
+```bash
+uvx --refresh --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp --version
+```
+
+刷完重启 MCP client(或 `claude mcp` 里重连)就是新版。`doctor` 会顺带检查 GitHub 上有没有新版本:
+
+```text
+  [!!] 版本 — 当前 v0.10.0,最新 v0.11.0
+       更新: uvx --refresh --from git+...
+```
+
+不想被更新影响的话,锁死某个 tag:
+
+```bash
+uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp@v0.10.0 mijia-home-mcp serve
+```
+
+`.mcp.json` 里同理,`args` 的 git 地址后面加 `@v0.10.0`。修 bug 的版本会发 [Releases](https://github.com/jiayunlimailutorontoca/mijia-home-mcp/releases),想收更新通知就 Watch 仓库的 Releases。
+
 ## 通知通道
 
 在 env 里配好通道,Claude 里会多一个 `send_notification` 工具,一次调用推所有配置的通道。什么都不配的话这个工具不会出现。
