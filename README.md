@@ -200,6 +200,8 @@ mijia-home-mcp watch --speak --meow 昵称 \
 
 `--ignore left-time` 这种很有必要,不然洗碗机倒计时每分钟推一条。钉钉/飞书收到的是卡片(逐条变化列表),MeoW 收到一句话摘要,`--webhook` 收到完整 diff JSON(带 `text` 字段,接 Bark/ntfy 可以直接用)。watch 的变化同时会写进本地历史,供 `query_history` 查。
 
+watch 还会每小时查一次耗材,状态跃迁(充足→不足→耗尽,以及换新后的恢复)当成普通变化事件走同一套通知/历史管道——"扫地机的耗材滤网不足了"会推到你手机上。`--only`/`--ignore` 对耗材事件同样生效。
+
 ## 环境变量
 
 CLI 参数和环境变量等价,参数优先:

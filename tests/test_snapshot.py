@@ -180,6 +180,39 @@ def test_snapshot_short_cache(fake_api, settings):
     assert "cached" not in snap5
 
 
+def test_diff_consumables(fake_api, settings):
+    """state 跃迁产出事件;恶化和恢复都报;新增条目不报。"""
+    client = _client(fake_api, settings)
+    prev = client.consumables()
+
+    # 滤网 2→3 恶化,刷头 3→1 恢复(换了新刷头)
+    items = fake_api.get_consumable_items()
+    items[0]["details"][1]["state"] = 3  # 滤网
+    items[1]["details"]["state"] = 1  # 刷头
+    fake_api.get_consumable_items = lambda home_id=None: items
+    cur = client.consumables()
+
+    changes = client.diff_consumables(prev, cur)
+    by_prop = {c["prop"]: c for c in changes}
+    assert by_prop["滤网"]["from"] == "不足" and by_prop["滤网"]["to"] == "耗尽"
+    assert by_prop["刷头"]["from"] == "耗尽" and by_prop["刷头"]["to"] == "充足"
+    assert all(c["type"] == "consumable_changed" for c in changes)
+    assert len(changes) == 2, "拖布没变,不该出现"
+
+    # 无变化 → 空
+    assert client.diff_consumables(cur, cur) == []
+
+
+def test_consumable_change_text():
+    from mijia_home_mcp.notify import format_changes_text
+
+    text = format_changes_text(
+        [{"type": "consumable_changed", "device": "扫地机", "prop": "滤网",
+          "from": "不足", "to": "耗尽"}]
+    )
+    assert text == "扫地机的耗材滤网耗尽了"
+
+
 def test_filter_devices_by_home(fake_api, settings):
     client = _client(fake_api, settings)
     assert len(client._filter_devices("我的家")) == 7

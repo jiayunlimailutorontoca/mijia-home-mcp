@@ -466,6 +466,26 @@ def _cmd_watch(args: argparse.Namespace) -> int:
     )
 
     _, prev = client.build_snapshot(home=args.home)
+
+    # 耗材基线。以天为单位变化,一小时查一次足够
+    CONSUMABLE_INTERVAL_S = 3600
+
+    def fetch_consumables():
+        try:
+            home_id = None
+            if args.home:
+                for h in client.homes():
+                    if args.home.strip() in (h.get("name"), str(h.get("id"))):
+                        home_id = h.get("id")
+                        break
+            return client.consumables(home_id)
+        except Exception as exc:
+            print(f"[{datetime.now():%H:%M:%S}] 耗材查询失败: {exc}", flush=True)
+            return None
+
+    prev_consumables = fetch_consumables()
+    last_consumable_check = _time.monotonic()
+
     print(f"[{datetime.now():%H:%M:%S}] 基线已建立,开始监控…", flush=True)
     try:
         while True:
@@ -479,6 +499,17 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             diff = client.diff_raw(prev, cur)
             prev = cur
             ts = f"[{datetime.now():%H:%M:%S}]"
+
+            if _time.monotonic() - last_consumable_check >= CONSUMABLE_INTERVAL_S:
+                last_consumable_check = _time.monotonic()
+                cur_consumables = fetch_consumables()
+                if cur_consumables is not None:
+                    if prev_consumables is not None:
+                        diff["changes"].extend(
+                            client.diff_consumables(prev_consumables, cur_consumables)
+                        )
+                    prev_consumables = cur_consumables
+
             diff["changes"] = filter_changes(
                 diff["changes"], only=args.only, ignore=args.ignore
             )
@@ -498,6 +529,12 @@ def _cmd_watch(args: argparse.Namespace) -> int:
                 if c["type"] == "prop_changed":
                     print(
                         f"{ts} {c['device']}: {c['prop']} "
+                        f"{c['from']} → {c['to']}",
+                        flush=True,
+                    )
+                elif c["type"] == "consumable_changed":
+                    print(
+                        f"{ts} 耗材 {c['device']}: {c['prop']} "
                         f"{c['from']} → {c['to']}",
                         flush=True,
                     )

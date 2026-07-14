@@ -475,6 +475,32 @@ class HomeClient:
             "count": len(items),
         }
 
+    @staticmethod
+    def diff_consumables(prev: dict, cur: dict) -> list[dict]:
+        """耗材 state 跃迁 → 变化事件,和 diff_raw 的事件同构,
+        直接混进 watch 的通知/历史管道。恶化和恢复都报:
+        恢复(3→1)是换耗材后的闭环确认。"""
+        from .semantics import consumable_status
+
+        def key_of(item: dict):
+            return (item["device"], item["item"])
+
+        prev_states = {key_of(i): i["state"] for i in prev.get("items", [])}
+        changes = []
+        for item in cur.get("items", []):
+            old = prev_states.get(key_of(item))
+            if old is not None and old != item["state"]:
+                changes.append(
+                    {
+                        "type": "consumable_changed",
+                        "device": item["device"],
+                        "prop": item["item"],
+                        "from": consumable_status(old),
+                        "to": item["status"],
+                    }
+                )
+        return changes
+
     # 写操作没走上游的 mijiaDevice:它构造一次就全量拉一遍设备列表,
     # 而且只认自有设备,别人单独共享给你的设备会直接 NotFound。
 

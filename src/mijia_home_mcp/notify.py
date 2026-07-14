@@ -53,6 +53,8 @@ def format_changes_text(changes: list[dict], limit: int = 5) -> str:
     for c in changes[:limit]:
         if c["type"] == "prop_changed":
             parts.append(f"{c['device']}的{c['prop']}从{c['from']}变为{c['to']}")
+        elif c["type"] == "consumable_changed":
+            parts.append(f"{c['device']}的耗材{c['prop']}{c['to']}了")
         else:
             parts.append(f"{c['device']}{_TYPE_TEXT.get(c['type'], c['type'])}")
     text = ";".join(parts)
@@ -87,7 +89,7 @@ def _changes_markdown_lines(changes: list[dict], limit: int = 10) -> list[str]:
     # 钉钉和飞书的卡片都吃 markdown,共用一份
     lines = []
     for c in changes[:limit]:
-        if c["type"] == "prop_changed":
+        if c["type"] in ("prop_changed", "consumable_changed"):
             lines.append(f"- **{c['device']}** {c['prop']}: {c['from']} → {c['to']}")
         else:
             lines.append(f"- **{c['device']}** {_TYPE_TEXT.get(c['type'], c['type'])}")
