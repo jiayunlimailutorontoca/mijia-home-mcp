@@ -351,6 +351,7 @@ class HomeClient:
                 "offline": offline_names,
                 "low_battery": attention_low_battery,
                 "faults": attention_faults,
+                "consumables": self._consumable_attention(home),
                 "spec_errors": spec_errors,
             },
             "stats": {
@@ -365,6 +366,30 @@ class HomeClient:
         raw = {"ts": snapshot["ts"], "devices": raw_state}
         self._snap_cache[cache_key] = (time.monotonic(), snapshot, raw)
         return snapshot, raw
+
+    def _consumable_attention(self, home: Optional[str]) -> list[str]:
+        """快照 attention 用:该换的耗材,一条一句话。失败静默返回空,
+        耗材接口挂了不该拖垮快照。带 10 分钟缓存,这数据变得很慢。"""
+        hit = self._cache.get("_consumable_attention")
+        if hit is not None and time.monotonic() - hit[0] < 600:
+            report = hit[1]
+        else:
+            try:
+                home_id = None
+                if home:
+                    for h in self.homes():
+                        if home.strip() in (h.get("name"), str(h.get("id"))):
+                            home_id = h.get("id")
+                            break
+                report = self.consumables(home_id)
+            except Exception:
+                return []
+            self._cache["_consumable_attention"] = (time.monotonic(), report)
+        return [
+            f"{i['device']}: {i['item']} {i['status']}"
+            + (f"(剩 {i['remaining']}%)" if i.get("remaining") else "")
+            for i in report["needs_attention"]
+        ]
 
     def battery_report(self, home: Optional[str] = None) -> dict:
         """所有带 battery-level 的在线设备电量,低的排前面。"""
@@ -401,6 +426,53 @@ class HomeClient:
             "devices": rows,
             "low": [r for r in rows if isinstance(r["battery"], (int, float)) and r["battery"] <= 20],
             "count": len(rows),
+        }
+
+    def consumables(self, home_id: Optional[str] = None) -> dict:
+        """耗材语义化清单。
+
+        state 是云端拿 value 对 inadeq/exhaust 两级阈值算好的三态
+        (1充足/2不足/3耗尽),直接信任它,不自己重算。
+        """
+        from .semantics import consumable_status
+
+        raw = self.api.get_consumable_items(home_id)
+        rooms = {}
+        for home in self.homes():
+            for room in home.get("roomlist", []) or []:
+                rooms[str(room.get("id"))] = room.get("name")
+
+        items = []
+        for entry in raw:
+            details = entry.get("details")
+            if isinstance(details, dict):
+                details = [details]
+            for d in details or []:
+                state = d.get("state")
+                value = d.get("value") or None
+                item = {
+                    "device": entry.get("name"),
+                    "room": rooms.get(str(entry.get("room_id")), None),
+                    "item": d.get("description"),
+                    "status": consumable_status(state),
+                    "state": state,
+                }
+                if value is not None:
+                    # 大多数是百分比;非 range 型(如次数/天数)原样给
+                    item["remaining"] = value
+                if d.get("left_time"):
+                    item["left_time"] = d["left_time"]
+                if d.get("reset_method"):
+                    item["resettable"] = True
+                items.append(item)
+
+        # 该管的排前面:耗尽 > 不足 > 充足
+        items.sort(key=lambda x: -(x["state"] or 0))
+        needs = [i for i in items if (i["state"] or 0) >= 2]
+        return {
+            "needs_attention": needs,
+            "items": items,
+            "count": len(items),
         }
 
     # 写操作没走上游的 mijiaDevice:它构造一次就全量拉一遍设备列表,

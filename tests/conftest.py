@@ -162,8 +162,8 @@ class FakeAPI:
                 "id": "home1",
                 "name": "我的家",
                 "roomlist": [
-                    {"name": "客厅", "dids": ["did_light", "did_speaker"]},
-                    {"name": "卧室", "dids": ["did_sensor", "did_lock", "did_offline", "blt.3.abc123"]},
+                    {"id": "room_keting", "name": "客厅", "dids": ["did_light", "did_speaker"]},
+                    {"id": "room_woshi", "name": "卧室", "dids": ["did_sensor", "did_lock", "did_offline", "blt.3.abc123"]},
                 ],
                 # did_norm 是"未分配房间"的家庭级设备,只出现在 home 级 dids
                 "dids": ["did_norm"],
@@ -229,7 +229,30 @@ class FakeAPI:
         return True
 
     def get_consumable_items(self, home_id=None):
-        return [{"name": "滤芯", "value": "剩余 20%"}]
+        # 结构对齐真实接口:details 可能是 dict 或 list,state 三态
+        return [
+            {
+                "name": "假扫地机",
+                "did": "did_vacuum",
+                "room_id": "room_keting",
+                "details": [
+                    {"description": "拖布", "value": "57", "state": 1,
+                     "inadeq": '{"val":"5","unit":"percentage","type":"range"}',
+                     "left_time": "", "reset_method": "action.9.1"},
+                    {"description": "滤网", "value": "3", "state": 2,
+                     "inadeq": '{"val":"5","unit":"percentage","type":"range"}',
+                     "left_time": "", "reset_method": "action.14.1"},
+                ],
+            },
+            {
+                "name": "假牙刷",
+                "did": "did_brush",
+                "room_id": "room_woshi",
+                "details": {"description": "刷头", "value": "", "state": 3,
+                            "inadeq": '{"val":"3","type":"range"}',
+                            "left_time": "", "reset_method": ""},
+            },
+        ]
 
 
 @pytest.fixture

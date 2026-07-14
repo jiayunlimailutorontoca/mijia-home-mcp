@@ -46,6 +46,15 @@ DANGEROUS_MODEL_PATTERNS: tuple[str, ...] = ("lock", "camera", "gas", "valve", "
 # 开关属性的常见名字,不同厂商的 spec 叫法不统一
 POWER_PROP_ALIASES: tuple[str, ...] = ("on", "power", "switch-status", "switch")
 
+# 耗材 state:云端拿 value 对 inadeq(不足线)/exhaust(耗尽线)两级阈值
+# 算出来的三态。枚举无官方文档,由真实数据 + hass-xiaomi-miot#2422 抓包
+# + 阈值字段结构交叉验证。
+CONSUMABLE_STATE = {1: "充足", 2: "不足", 3: "耗尽"}
+
+
+def consumable_status(state) -> str:
+    return CONSUMABLE_STATE.get(state, f"未知(state={state})")
+
 LOW_BATTERY_THRESHOLD = 15
 
 

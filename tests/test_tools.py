@@ -303,6 +303,30 @@ def test_default_home_in_auth_status(fake_api, settings):
     assert info["default_home"] == "我的家"
 
 
+def test_consumables_semantic(fake_api, settings):
+    mcp = build_server(settings, api=fake_api)
+    report = _run(_call(mcp, "list_consumables"))
+    assert report["count"] == 3
+    # 排序:耗尽(3) > 不足(2) > 充足(1)
+    assert [i["state"] for i in report["items"]] == [3, 2, 1]
+    assert report["items"][0]["status"] == "耗尽"
+    assert report["items"][0]["item"] == "刷头"
+    assert report["items"][0]["room"] == "卧室"
+    assert report["items"][1]["remaining"] == "3"
+    assert report["items"][2]["resettable"] is True
+    # needs_attention 只有该管的两条
+    assert len(report["needs_attention"]) == 2
+
+
+def test_snapshot_attention_includes_consumables(fake_api, settings):
+    mcp = build_server(settings, api=fake_api)
+    snap = _run(_call(mcp, "get_home_snapshot"))
+    cons = snap["attention"]["consumables"]
+    assert any("刷头" in c and "耗尽" in c for c in cons)
+    assert any("滤网" in c and "不足" in c for c in cons)
+    assert not any("拖布" in c for c in cons), "充足的不该出现在 attention"
+
+
 def test_resources(fake_api, settings):
     """三个 resource:列表可见、内容正确、默认家庭生效。"""
     import json

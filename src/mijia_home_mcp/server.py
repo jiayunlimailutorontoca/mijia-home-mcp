@@ -498,14 +498,17 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     @_friendly_errors
-    def list_consumables(home: Optional[str] = None) -> list[dict]:
-        """列出耗材状态(滤芯/电池等),用于回答"哪些耗材该换了"。
+    def list_consumables(home: Optional[str] = None) -> dict:
+        """耗材状态(滤芯/拖布/刷头/电池等),回答"哪些耗材该换了"。
+
+        status 是米家云端算好的三态:充足/不足/耗尽。needs_attention
+        里是不足和耗尽的,items 按紧急程度排序。
 
         Args:
             home: 可选,家庭名称或ID;不传用服务端默认家庭,均未配置则列所有。
         """
         client = ctx.ready_client()
-        return client.api.get_consumable_items(
+        return client.consumables(
             _resolve_home_id(client, _home_or_default(home))
         )
 
