@@ -63,6 +63,25 @@ def test_empty_history_has_note(tmp_path):
     assert "watch" in result["note"]
 
 
+def test_truncated_exact_limit_across_days(tmp_path):
+    """今天恰好凑满 limit、昨天还有货:必须 truncated=True,不能静默丢。"""
+    h = _history(tmp_path)
+    h.history_dir.mkdir(parents=True)
+    yesterday = datetime.now() - timedelta(days=1)
+    old_file = h.history_dir / f"events-{yesterday:%Y%m%d}.jsonl"
+    old_file.write_text(
+        json.dumps({"ts": yesterday.isoformat(timespec="seconds"),
+                    "type": "prop_changed", "device": "昨天的灯"}) + "\n",
+        encoding="utf-8",
+    )
+    for i in range(5):
+        h.append([{"type": "prop_changed", "device": f"今天{i}", "prop": "on",
+                   "from": 0, "to": 1}])
+    result = h.query(since=(yesterday - timedelta(hours=1)).isoformat(), limit=5)
+    assert result["count"] == 5
+    assert result["truncated"] is True, "昨天还有一条,恰好凑满时不能报 False"
+
+
 def test_retention_cleanup(tmp_path):
     h = _history(tmp_path)
     h.history_dir.mkdir(parents=True)

@@ -47,13 +47,25 @@ DANGEROUS_MODEL_PATTERNS: tuple[str, ...] = ("lock", "camera", "gas", "valve", "
 POWER_PROP_ALIASES: tuple[str, ...] = ("on", "power", "switch-status", "switch")
 
 # 耗材 state:云端拿 value 对 inadeq(不足线)/exhaust(耗尽线)两级阈值
-# 算出来的三态。枚举无官方文档,由真实数据 + hass-xiaomi-miot#2422 抓包
-# + 阈值字段结构交叉验证。
-CONSUMABLE_STATE = {1: "充足", 2: "不足", 3: "耗尽"}
+# 算出来的状态。枚举无官方文档,由真实数据 + hass-xiaomi-miot#2422 抓包
+# + 阈值字段结构交叉验证。4 = 寿命从未上报(蓝牙设备常见),数据缺失
+# 而非告警,不该进提醒。
+CONSUMABLE_STATE = {1: "充足", 2: "不足", 3: "耗尽", 4: "未上报"}
+
+# 该提醒用户的 state(4 是数据缺失,不算)
+CONSUMABLE_ALERT_STATES = (2, 3)
 
 
 def consumable_status(state) -> str:
     return CONSUMABLE_STATE.get(state, f"未知(state={state})")
+
+
+def consumable_state_int(state) -> int:
+    """state 容错转 int:云端偶发回字符串;转不动的当 0(不告警不排前)。"""
+    try:
+        return int(state)
+    except (TypeError, ValueError):
+        return 0
 
 LOW_BATTERY_THRESHOLD = 15
 

@@ -168,14 +168,25 @@ def test_feishu_card_when_changes(http_sink):
     assert "客厅台灯" in md and "→" in md
 
 
-def test_send_bark_key_and_url(http_sink):
+def test_send_bark_selfhosted_with_key(http_sink):
     from mijia_home_mcp.notify import send_bark
 
     base, received = http_sink
-    send_bark(f"{base}/push", "米家提醒", "灯开了")
+    # 自建:key 拼在 URL 末尾,请求打到 /push 且 payload 必须带 device_key
+    send_bark(f"{base}/my_device_key", "米家提醒", "灯开了")
     path, _, body = received[0]
     assert path == "/push"
-    assert body == {"title": "米家提醒", "body": "灯开了"}
+    assert body == {"device_key": "my_device_key", "title": "米家提醒", "body": "灯开了"}
+
+
+def test_send_bark_selfhosted_without_key_rejected():
+    from mijia_home_mcp.notify import send_bark
+
+    # 裸根地址解析不出 key,直接报配置错,不发必失败的请求
+    with pytest.raises(ValueError, match="device key"):
+        send_bark("https://bark.example.com", "米家提醒", "x")
+    with pytest.raises(ValueError, match="device key"):
+        send_bark("https://bark.example.com/push", "米家提醒", "x")
 
 
 def test_send_ntfy_topic_and_url(http_sink):
@@ -186,6 +197,14 @@ def test_send_ntfy_topic_and_url(http_sink):
     path, _, body = received[0]
     assert path == "/"  # 自建 URL:根地址发布,topic 在 body 里
     assert body == {"topic": "mytopic", "title": "米家提醒", "message": "灯开了"}
+
+
+def test_send_ntfy_url_without_topic_rejected():
+    from mijia_home_mcp.notify import send_ntfy
+
+    # 无 topic 段的自建地址以前会把 base 切成 "https:/" 报出天书错误
+    with pytest.raises(ValueError, match="topic"):
+        send_ntfy("https://my.ntfy.host", "米家提醒", "x")
 
 
 def test_pusher_uses_text_without_changes(http_sink):

@@ -229,7 +229,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--http-token",
         default=None,
         metavar="TOKEN",
-        help="http 传输的 Bearer token,客户端需带 Authorization: Bearer <TOKEN>;不设则无鉴权",
+        help="http 传输的 Bearer token,客户端需带 Authorization: Bearer <TOKEN>;"
+        "不设则无鉴权。建议改用环境变量 MIJIA_HOME_MCP_HTTP_TOKEN,"
+        "命令行参数会出现在进程列表里",
     )
     return parser
 
@@ -410,7 +412,8 @@ def _cmd_battery(args: argparse.Namespace) -> int:
     for row in report["devices"]:
         level = row["battery"]
         bar = "!" if isinstance(level, (int, float)) and level <= 20 else " "
-        print(f" {bar} {level:>3}%  {row['name']}  ({row['room']})")
+        level_s = "  ?" if level is None else f"{level:>3}"
+        print(f" {bar} {level_s}%  {row['name']}  ({row['room']})")
     print(f"\n共 {report['count']} 台带电池设备,{len(report['low'])} 台低电量(≤20%)")
     return 0
 
@@ -513,6 +516,8 @@ def _cmd_watch(args: argparse.Namespace) -> int:
             diff["changes"] = filter_changes(
                 diff["changes"], only=args.only, ignore=args.ignore
             )
+            # extend 耗材事件和 filter 之后要把计数对齐,webhook 消费方看这个字段
+            diff["change_count"] = len(diff["changes"])
             if not diff["changes"]:
                 print(f"{ts} 无变化", flush=True)
                 continue

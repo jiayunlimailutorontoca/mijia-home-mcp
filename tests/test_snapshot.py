@@ -213,6 +213,62 @@ def test_consumable_change_text():
     assert text == "扫地机的耗材滤网耗尽了"
 
 
+def test_same_name_homes_isolated_by_id(fake_api, settings):
+    """两个家庭都叫「我的家」时,按 ID 过滤必须只出一家的设备。"""
+    orig_homes = fake_api.get_homes_list
+
+    def homes_with_dup():
+        return orig_homes() + [
+            {"id": "home2", "name": "我的家",
+             "roomlist": [{"id": "r2", "name": "客厅", "dids": ["did_dup"]}]}
+        ]
+
+    orig_devs = fake_api.get_devices_list
+    fake_api.get_homes_list = homes_with_dup
+    fake_api.get_devices_list = lambda home_id=None: orig_devs() + [
+        {"did": "did_dup", "name": "另一家的灯", "model": "fake.light.v1",
+         "isOnline": True, "home_id": "home2"}
+    ]
+    client = _client(fake_api, settings)
+
+    only_home1 = client._filter_devices("home1")
+    assert all(d["home_id"] == "home1" for d in only_home1)
+    only_home2 = client._filter_devices("home2")
+    assert [d["name"] for d in only_home2] == ["另一家的灯"]
+    # 按名字过滤命中两家(名字就是歧义的),但至少要包含两家全部设备
+    by_name = client._filter_devices("我的家")
+    assert len(by_name) == len(only_home1) + 1
+
+
+def test_consumable_state4_not_alerted(fake_api, settings):
+    """state=4(寿命未上报)是数据缺失,不进 needs_attention;字符串 state 不崩。"""
+    items = fake_api.get_consumable_items()
+    items[1]["details"]["state"] = 4  # 刷头 → 未上报
+    items[0]["details"][0]["state"] = "2"  # 拖布 → 云端偶发字符串
+    fake_api.get_consumable_items = lambda home_id=None: items
+    client = _client(fake_api, settings)
+    report = client.consumables()
+    by_item = {i["item"]: i for i in report["items"]}
+    assert by_item["刷头"]["status"] == "未上报"
+    assert by_item["拖布"]["state"] == 2, "字符串 state 应转 int"
+    needs_items = {i["item"] for i in report["needs_attention"]}
+    assert "刷头" not in needs_items
+    assert needs_items == {"拖布", "滤网"}
+
+
+def test_diff_consumables_same_name_devices(fake_api, settings):
+    """两台同名设备靠 did 区分,状态不变时不得产生误报。"""
+    items = fake_api.get_consumable_items() + [
+        {"name": "假扫地机", "did": "did_vacuum2", "room_id": "room_keting",
+         "details": [{"description": "滤网", "value": "90", "state": 1,
+                      "inadeq": "{}", "left_time": "", "reset_method": ""}]},
+    ]
+    fake_api.get_consumable_items = lambda home_id=None: items
+    client = _client(fake_api, settings)
+    snap = client.consumables()
+    assert client.diff_consumables(snap, snap) == [], "同名设备状态未变不该报"
+
+
 def test_filter_devices_by_home(fake_api, settings):
     client = _client(fake_api, settings)
     assert len(client._filter_devices("我的家")) == 7

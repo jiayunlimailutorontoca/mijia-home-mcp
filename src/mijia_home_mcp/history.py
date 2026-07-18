@@ -103,8 +103,10 @@ class EventHistory:
                                 continue
                             day_events.append(ev)
                     matched.extend(reversed(day_events))  # 天内新→旧
-                    if len(matched) >= limit:
-                        truncated = len(matched) > limit
+                    # 严格大于才停:恰好凑满 limit 时还得看更早的天
+                    # 有没有货,否则 truncated 会误报 False
+                    if len(matched) > limit:
+                        truncated = True
                         matched = matched[:limit]
                         break
                 day -= timedelta(days=1)

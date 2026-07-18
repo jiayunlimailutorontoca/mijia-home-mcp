@@ -109,9 +109,9 @@ uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp@v0.10.0 
 
 MeoW([文档](https://www.chuckfang.com/MeoW/api_doc.html)):鸿蒙手机装 MeoW,注册个昵称,昵称直接填 `MEOW` 就行。自建服务的话填完整 URL。
 
-Bark([文档](https://bark.day.app/)):iPhone 装 Bark,app 里复制 device key 填 `BARK`;自建服务器填完整 URL。
+Bark([文档](https://bark.day.app/)):iPhone 装 Bark,app 里复制 device key 填 `BARK`;自建服务器把 key 拼在 URL 里,填 `https://你的服务器/你的key`。
 
-ntfy([文档](https://docs.ntfy.sh/)):安卓/桌面装 ntfy,订阅一个自取的 topic 名,topic 填 `NTFY`;自建填 `https://你的服务器/topic`。注意 ntfy.sh 的公开 topic 谁都能订阅,名字取长取随机。
+ntfy([文档](https://docs.ntfy.sh/)):安卓/桌面装 ntfy,订阅一个自取的 topic 名,topic 填 `NTFY`;自建填 `https://你的服务器/topic`(必须带 topic 段)。注意 ntfy.sh 的公开 topic 谁都能订阅,名字取长取随机。
 
 鸿蒙/苹果/安卓三端都要收的话,MeoW + Bark + ntfy 三个都配上,`send_notification` 一次全推。
 

@@ -58,6 +58,8 @@ class HomeClient:
         # 整屋快照要 6~10s,对话里连着问两次没必要重新拉
         self._snap_cache: dict[tuple, tuple[float, dict, dict]] = {}
         self.snapshot_ttl_s = 30.0
+        # 耗材 attention 的 10 分钟缓存,独立于 _cache(见 _consumable_attention)
+        self._consumable_cache: dict[str, tuple[float, dict]] = {}
 
     def _cached(self, key: str, loader):
         hit = self._cache.get(key)
@@ -197,19 +199,22 @@ class HomeClient:
 
     def _filter_devices(self, home: Optional[str]) -> list[dict]:
         devices = self.devices()
-        if not home:
+        if home is None or not str(home).strip():
             return devices
-        home = home.strip()
-        matched_names = set()
-        for h in self.homes():
-            if home in (h.get("name"), str(h.get("id"))):
-                matched_names.add(h.get("name") or str(h.get("id")))
+        home = str(home).strip()
         if home == SHARED_HOME:
-            matched_names.add(SHARED_HOME)
-        if not matched_names:
+            return [d for d in devices if d["_home"] == SHARED_HOME]
+        # 按 home_id 过滤而不是名字:米家默认家庭都叫"我的家",
+        # 被共享的家庭也在列表里,同名撞车是常态
+        matched_ids = {
+            str(h.get("id"))
+            for h in self.homes()
+            if home in (h.get("name"), str(h.get("id")))
+        }
+        if not matched_ids:
             known = ", ".join(sorted({d["_home"] for d in devices}))
             raise DeviceResolveError(f"未找到家庭「{home}」。可选: {known}")
-        return [d for d in devices if d["_home"] in matched_names]
+        return [d for d in devices if str(d.get("home_id")) in matched_ids]
 
     def build_snapshot(
         self,
@@ -369,8 +374,13 @@ class HomeClient:
 
     def _consumable_attention(self, home: Optional[str]) -> list[str]:
         """快照 attention 用:该换的耗材,一条一句话。失败静默返回空,
-        耗材接口挂了不该拖垮快照。带 10 分钟缓存,这数据变得很慢。"""
-        hit = self._cache.get("_consumable_attention")
+        耗材接口挂了不该拖垮快照。
+
+        缓存 10 分钟且按 home 分键;放独立 dict 里,不能进 _cache——
+        watch 每轮 invalidate_cache 会把 _cache 清空,耗材缓存跟着
+        被击穿的话,30s 一次的快照轮询会放大成 60 倍的耗材云端请求。"""
+        cache_key = home or "__all__"
+        hit = self._consumable_cache.get(cache_key)
         if hit is not None and time.monotonic() - hit[0] < 600:
             report = hit[1]
         else:
@@ -384,7 +394,7 @@ class HomeClient:
                 report = self.consumables(home_id)
             except Exception:
                 return []
-            self._cache["_consumable_attention"] = (time.monotonic(), report)
+            self._consumable_cache[cache_key] = (time.monotonic(), report)
         return [
             f"{i['device']}: {i['item']} {i['status']}"
             + (f"(剩 {i['remaining']}%)" if i.get("remaining") else "")
@@ -431,10 +441,14 @@ class HomeClient:
     def consumables(self, home_id: Optional[str] = None) -> dict:
         """耗材语义化清单。
 
-        state 是云端拿 value 对 inadeq/exhaust 两级阈值算好的三态
-        (1充足/2不足/3耗尽),直接信任它,不自己重算。
+        state 是云端算好的:1充足/2不足/3耗尽/4未上报,直接信任不重算。
+        只有 2/3 进 needs_attention——4 是数据缺失不是告警。
         """
-        from .semantics import consumable_status
+        from .semantics import (
+            CONSUMABLE_ALERT_STATES,
+            consumable_state_int,
+            consumable_status,
+        )
 
         raw = self.api.get_consumable_items(home_id)
         rooms = {}
@@ -448,10 +462,11 @@ class HomeClient:
             if isinstance(details, dict):
                 details = [details]
             for d in details or []:
-                state = d.get("state")
+                state = consumable_state_int(d.get("state"))
                 value = d.get("value") or None
                 item = {
                     "device": entry.get("name"),
+                    "did": entry.get("did"),
                     "room": rooms.get(str(entry.get("room_id")), None),
                     "item": d.get("description"),
                     "status": consumable_status(state),
@@ -466,9 +481,9 @@ class HomeClient:
                     item["resettable"] = True
                 items.append(item)
 
-        # 该管的排前面:耗尽 > 不足 > 充足
-        items.sort(key=lambda x: -(x["state"] or 0))
-        needs = [i for i in items if (i["state"] or 0) >= 2]
+        # 该管的排前面:耗尽 > 不足 > 其他
+        items.sort(key=lambda x: (x["state"] not in CONSUMABLE_ALERT_STATES, -x["state"]))
+        needs = [i for i in items if i["state"] in CONSUMABLE_ALERT_STATES]
         return {
             "needs_attention": needs,
             "items": items,
@@ -483,7 +498,8 @@ class HomeClient:
         from .semantics import consumable_status
 
         def key_of(item: dict):
-            return (item["device"], item["item"])
+            # did 优先:两台同型号设备名字可能一样,名字作 key 会互相覆盖
+            return (item.get("did") or item["device"], item["item"])
 
         prev_states = {key_of(i): i["state"] for i in prev.get("items", [])}
         changes = []

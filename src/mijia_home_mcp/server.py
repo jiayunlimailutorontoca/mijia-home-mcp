@@ -52,6 +52,20 @@ class ServerContext:
         self._login_lock = threading.Lock()
         self._login_thread: Optional[threading.Thread] = None
         self._login_status: dict = {"status": "idle"}
+        self._notify_times: list[float] = []
+        self._notify_lock = threading.Lock()
+
+    def allow_notification(self, limit: int = 10, window_s: float = 60.0) -> bool:
+        """send_notification 的滑动窗口节流。"""
+        import time as _time
+
+        with self._notify_lock:
+            now = _time.monotonic()
+            self._notify_times = [t for t in self._notify_times if now - t < window_s]
+            if len(self._notify_times) >= limit:
+                return False
+            self._notify_times.append(now)
+            return True
 
     def try_init_api(self) -> Optional[str]:
         """从认证文件初始化,失败返回原因字符串(不抛,启动时也会调)。"""
@@ -156,8 +170,11 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
     )
 
     def _home_or_default(home: Optional[str]) -> Optional[str]:
-        # 多家庭账号可以在配置里锁一个默认家庭;工具显式传了以传的为准
-        return home if home is not None else settings.home
+        # 多家庭账号可以在配置里锁一个默认家庭;工具显式传了以传的为准。
+        # 空串/空白当没传——模型经常拿 "" 当 null 用
+        if home is not None and str(home).strip():
+            return home
+        return settings.home
 
     # resources:给客户端翻的资料。龙虾会转成 resources_read 工具,
     # Claude Code 里用 @ 引用。devices 便宜随便读,snapshot 有 30s 缓存兜底。
@@ -277,6 +294,7 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         event_type: Optional[
             Literal[
                 "prop_changed",
+                "consumable_changed",
                 "went_offline",
                 "came_online",
                 "device_added",
@@ -464,8 +482,8 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
         return client.spec(model)
 
     def _resolve_home_id(client: HomeClient, home: Optional[str]) -> Optional[str]:
-        """家庭名称或ID → 上游要求的 home_id;None 原样透传。"""
-        if home is None:
+        """家庭名称或ID → 上游要求的 home_id;None/空白原样当"不限"。"""
+        if home is None or not str(home).strip():
             return None
         for h in client.homes():
             if home.strip() in (h.get("name"), str(h.get("id"))):
@@ -585,12 +603,38 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
             通道在 MCP server 配置中声明(钉钉/飞书/MeoW/webhook/小爱音箱),
             本工具一次调用推送全部通道,返回每个通道的结果。
             适合"提醒我""通知家里人""推送到手机"这类请求。
+            频率限制:每分钟最多 10 条。
 
             Args:
                 message: 消息正文。
                 title: 消息标题,默认"米家提醒"。
             """
             from .notify import Pusher, SpeakerNotifier
+
+            # 节流:模型被诱导刷屏会打爆群机器人限流,把 watch 的真实告警挤掉
+            if not ctx.allow_notification():
+                ctx.guard.audit(
+                    "send_notification", "throttled",
+                    {"title": title, "message": message[:100]}, False,
+                    "rate limited",
+                )
+                raise ToolError(
+                    "send_notification 触发频率限制(每分钟最多 10 条)。"
+                    "如需批量提醒,请合并成一条消息。"
+                )
+
+            # 音箱通道要动设备,先把认证和选箱做完再发任何 HTTP——
+            # 反过来的话 HTTP 已经发出去了这边才报错,重试就重复推送
+            speaker_notifier = None
+            if settings.speaker:
+                client = ctx.ready_client()
+                try:
+                    speaker_notifier = SpeakerNotifier(
+                        client,
+                        None if settings.speaker == "auto" else settings.speaker,
+                    )
+                except ValueError as exc:
+                    raise ToolError(str(exc)) from exc
 
             results: dict[str, str] = {}
             pusher = Pusher(
@@ -603,27 +647,25 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
                 ntfy=settings.ntfy,
                 webhook=settings.webhook,
             )
-            errors = pusher.push(title, message, {"changes": []})
-            error_map = dict(e.split(": ", 1) for e in errors if ": " in e)
-            for channel in pusher.channels:
-                results[channel] = error_map.get(channel, "ok")
-            if settings.speaker:
-                client = ctx.ready_client()
-                try:
-                    name = (
-                        None if settings.speaker == "auto" else settings.speaker
-                    )
-                    notifier = SpeakerNotifier(client, name)
-                    notifier.announce(f"{title}:{message}")
-                    results[f"小爱音箱({notifier.name})"] = "ok"
-                except Exception as exc:
-                    results["小爱音箱"] = str(exc)
-            ctx.guard.audit(
-                "send_notification",
-                ",".join(results),
-                {"title": title, "message": message},
-                all(v == "ok" for v in results.values()),
-            )
+            try:
+                errors = pusher.push(title, message, {"changes": []})
+                error_map = dict(e.split(": ", 1) for e in errors if ": " in e)
+                for channel in pusher.channels:
+                    results[channel] = error_map.get(channel, "ok")
+                if speaker_notifier is not None:
+                    try:
+                        speaker_notifier.announce(f"{title}:{message}")
+                        results[f"小爱音箱({speaker_notifier.name})"] = "ok"
+                    except Exception as exc:
+                        results["小爱音箱"] = str(exc)
+            finally:
+                # 推送可能已实际发出,审计必须落盘
+                ctx.guard.audit(
+                    "send_notification",
+                    ",".join(results) or "none",
+                    {"title": title, "message": message[:200]},
+                    bool(results) and all(v == "ok" for v in results.values()),
+                )
             return results
 
     @mcp.tool(annotations=READ_ONLY)

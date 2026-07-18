@@ -73,16 +73,20 @@ Without `--http-token` there is no auth and a warning is printed at startup. Don
 
 ## Tools
 
-Read (always on): `get_home_snapshot` (home/room filter, compact/full, 30 s cache), `get_home_changes`, `query_history` (local 30-day event log, populated while `watch` runs), `get_battery_report`, `get_device_statistics`, `list_homes` / `list_devices` / `get_device_status` / `get_device_spec` / `list_scenes` / `list_consumables`, `auth_status` / `login` / `login_status`, `send_notification` (when channels configured). Plus a `home_briefing` prompt.
+Read (always on): `get_home_snapshot` (home/room filter, compact/full, 30 s cache), `get_home_changes`, `query_history` (local 30-day event log, populated while `watch` runs), `get_battery_report`, `get_device_statistics`, `list_homes` / `list_devices` / `get_device_status` / `get_device_spec` / `list_scenes`, `list_consumables` (semantic three-state: sufficient / low / exhausted, cloud-computed — worn-out items also surface in snapshot attention), `auth_status` / `login` / `login_status`, `send_notification` (when channels configured; rate-limited to 10/min). Plus a `home_briefing` prompt.
 
-Control (with `--enable-control`): `set_device_property`, `run_device_action`, `run_scene`, `speaker_announce`, `run_speaker_command`.
+Control (with `--enable-control`): `turn_on` / `turn_off` (auto-detects the power property), `set_device_property`, `run_device_action`, `run_scene`, `speaker_announce`, `run_speaker_command`.
+
+MCP resources: `mijia://devices` (cheap, near-static device roster), `mijia://homes`, `mijia://snapshot` (hits the cloud, 30 s cache). OpenClaw surfaces these as `resources_read`; Claude Code references them with `@`.
+
+Notification channels: Xiaomi speaker TTS, DingTalk (signed), Feishu/Lark (signed), MeoW (HarmonyOS), Bark (iOS — self-hosted needs the device key in the URL: `https://host/<key>`), ntfy (Android/desktop), generic webhook.
 
 ## CLI
 
 Works standalone, no MCP client required:
 
 ```bash
-mijia-home-mcp doctor        # auth / connectivity self-check
+mijia-home-mcp doctor        # auth / connectivity self-check + update check
 mijia-home-mcp snapshot      # whole home at a glance
 mijia-home-mcp devices
 mijia-home-mcp battery
@@ -90,7 +94,7 @@ mijia-home-mcp say "dinner is ready"
 mijia-home-mcp watch --speak --only "door*" --ignore left-time
 ```
 
-`watch` polls, prints changes, optionally pushes them (speaker / DingTalk card / Feishu card / MeoW / webhook), and records everything into the local history that `query_history` reads. `--ignore left-time` matters — a running dishwasher counts down every minute.
+`watch` polls, prints changes, optionally pushes them through the notification channels, checks consumables hourly (state transitions like "filter low" go through the same pipeline), and records everything into the local history that `query_history` reads. `--ignore left-time` matters — a running dishwasher counts down every minute.
 
 ## Known limits
 

@@ -187,14 +187,28 @@ def send_meow(nickname_or_url: str, title: str, text: str) -> None:
 
 
 def send_bark(key_or_url: str, title: str, text: str) -> None:
-    """Bark(iOS 推送)。传 device key 就打官方 api.day.app,传 URL 用自建。"""
+    """Bark(iOS 推送)。传 device key 打官方 api.day.app;
+    自建传完整 URL 且把 key 拼在路径末尾:https://host/你的key。
+
+    bark-server 的 /push 无论官方自建都要 device_key,所以自建 URL
+    里必须能解析出 key,解析不出直接报配置错,别发一个必失败的请求。
+    """
     if key_or_url.startswith(("http://", "https://")):
-        base = key_or_url.rstrip("/")
-        # 自建服务器给到根地址即可,统一走 /push
-        url = base if base.endswith("/push") else f"{base}/push"
-        payload = {"title": title, "body": text}
-        # 自建 URL 里带 key 的情况:/push 不需要 device_key,兼容两种都传
-        _post_json(url, payload, check_body=True)
+        parts = urllib.parse.urlsplit(key_or_url.rstrip("/"))
+        path = parts.path.strip("/")
+        if path.endswith("push"):  # 手滑带了 /push 后缀
+            path = path[: -len("push")].strip("/")
+        prefix, _, key = path.rpartition("/")
+        if not key:
+            raise ValueError(
+                "自建 Bark 需要把 device key 拼在 URL 里,如 https://host/你的key"
+            )
+        base = f"{parts.scheme}://{parts.netloc}" + (f"/{prefix}" if prefix else "")
+        _post_json(
+            f"{base}/push",
+            {"device_key": key, "title": title, "body": text},
+            check_body=True,
+        )
     else:
         _post_json(
             "https://api.day.app/push",
@@ -204,13 +218,19 @@ def send_bark(key_or_url: str, title: str, text: str) -> None:
 
 
 def send_ntfy(topic_or_url: str, title: str, text: str) -> None:
-    """ntfy(安卓/桌面推送)。传 topic 走 ntfy.sh,传 URL 用自建。
+    """ntfy(安卓/桌面推送)。传 topic 走 ntfy.sh,自建传 https://host/topic。
 
     走 JSON 发布而不是 Title 头,HTTP 头塞中文要 RFC2047 编码,JSON 没这事。
     """
     if topic_or_url.startswith(("http://", "https://")):
-        # 自建:https://my.ntfy.host/mytopic → 根地址 + topic
-        base, _, topic = topic_or_url.rstrip("/").rpartition("/")
+        parts = urllib.parse.urlsplit(topic_or_url.rstrip("/"))
+        path = parts.path.strip("/")
+        prefix, _, topic = path.rpartition("/")
+        if not parts.netloc or not topic:
+            raise ValueError(
+                "自建 ntfy 地址需要带 topic,如 https://host/mytopic"
+            )
+        base = f"{parts.scheme}://{parts.netloc}" + (f"/{prefix}" if prefix else "")
         _post_json(base, {"topic": topic, "title": title, "message": text})
     else:
         _post_json(

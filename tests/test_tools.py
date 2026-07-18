@@ -357,6 +357,25 @@ def test_resources(fake_api, settings):
     _run(go())
 
 
+def test_empty_home_string_uses_default(fake_api, settings):
+    """home 传空串等同没传,不能绕过锁定的默认家庭。"""
+    settings.home = "我的家"
+    mcp = build_server(settings, api=fake_api)
+    snap = _run(_call(mcp, "get_home_snapshot", {"home": ""}))
+    assert [h["name"] for h in snap["homes"]] == ["我的家"]
+    devs = _run(_call(mcp, "list_devices", {"home": "  "}))
+    assert all(d["home"] == "我的家" for d in devs)
+
+
+def test_send_notification_throttle(fake_api, settings):
+    settings.speaker = "auto"
+    mcp = build_server(settings, api=fake_api)
+    for _ in range(10):
+        _run(_call(mcp, "send_notification", {"message": "x"}))
+    with pytest.raises(ToolError, match="频率限制"):
+        _run(_call(mcp, "send_notification", {"message": "第11条"}))
+
+
 def test_auth_status_without_login(settings):
     mcp = build_server(settings)  # 不注入 api,认证文件不存在
     data = _run(_call(mcp, "auth_status"))
