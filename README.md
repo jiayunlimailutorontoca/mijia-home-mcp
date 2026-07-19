@@ -12,7 +12,30 @@
 
 ## 安装
 
-不用 clone,uvx 直接跑:
+最省事:把下面的提示词直接发给你的 AI,让它自己装。
+
+**发给 Claude Code:**
+
+```text
+帮我安装 mijia-home 米家 MCP:
+1. 先运行 uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp login,把终端打印的二维码给我用米家 App 扫(已有 ~/.config/mijia-api/auth.json 且未过期就跳过)
+2. 运行 claude mcp add mijia-home -- uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp serve
+3. 如果我的账号有多个家庭,先问我默认锁哪个家,然后在上一步命令里加 --env MIJIA_HOME_MCP_HOME_NAME=家庭名
+4. 验证:调 get_home_snapshot,把在线设备数报给我
+注意:登录扫码那步需要我人工参与,到那一步停下来等我。
+```
+
+**发给龙虾(OpenClaw):**
+
+```text
+帮我安装 mijia-home 米家 MCP:
+1. 登录:uvx --from git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp mijia-home-mcp login,二维码给我扫
+2. openclaw mcp add mijia-home --command uvx --arg "--from" --arg "git+https://github.com/jiayunlimailutorontoca/mijia-home-mcp" --arg "mijia-home-mcp" --arg "serve",然后 openclaw mcp probe mijia-home 应显示 14+ tools
+3. probe 正常但会话里没工具的话,可能要 npm i -g mcporter(openclaw doctor 会提示)
+4. 验证:调 get_home_snapshot 报设备数
+```
+
+手动装:
 
 ```bash
 # 先扫码登录,终端会打印二维码
