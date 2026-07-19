@@ -87,7 +87,7 @@ mijia-home-mcp serve --enable-control --allow "客厅*" --deny "*camera*"
 规则:
 
 - 锁/摄像头/燃气水阀/保险柜不吃通配符,必须 `--allow` 精确写设备名或 did,或 `--allow-dangerous`
-- `run_speaker_command`(小爱执行语音指令)能触达全屋设备,按危险设备同等门控;纯播报用 `speaker_announce`,普通门控
+- `run_speaker_command`(小爱执行语音指令)能触达全屋设备,按危险设备同等门控;经 `run_device_action` 调 `execute-text-directive` 走同一道闸,绕不过去。纯播报用 `speaker_announce`,普通门控
 - `run_scene` 不看白名单——场景内容是你在米家 App 定义的,不想让 AI 碰的别做成手动场景
 - 所有写操作(含被拒的)记 `~/.config/mijia-home-mcp/audit.log`
 

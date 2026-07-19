@@ -177,6 +177,60 @@ def test_speaker_command_with_exact_allow(fake_api, settings):
     assert fake_api.action_calls[-1]["in"] == ["打开卧室台灯", 1]
 
 
+def test_run_device_action_directive_uses_speaker_gate(fake_api, settings):
+    """execute-text-directive 从 run_device_action 进来也要走危险音箱闸,
+    不能只按普通设备放行(否则绕过 run_speaker_command 的门控)。"""
+    settings.enable_control = True
+    mcp = build_server(settings, api=fake_api)
+    with pytest.raises(ToolError, match="语音指令"):
+        _run(
+            _call(
+                mcp,
+                "run_device_action",
+                {
+                    "device": "小爱音箱",
+                    "action_name": "execute-text-directive",
+                    "value": ["打开卧室门锁", 1],
+                },
+            )
+        )
+    assert not fake_api.action_calls, "被拒的语音指令不应触达云端"
+
+
+def test_run_device_action_directive_released_by_exact_allow(fake_api, settings):
+    """音箱精确加入 allow 后,execute-text-directive 才放行。"""
+    settings.enable_control = True
+    settings.allow = ["小爱音箱"]
+    mcp = build_server(settings, api=fake_api)
+    msg = _run(
+        _call(
+            mcp,
+            "run_device_action",
+            {
+                "device": "小爱音箱",
+                "action_name": "execute-text-directive",
+                "value": ["打开客厅台灯", 1],
+            },
+        )
+    )
+    assert "执行成功" in msg
+    assert fake_api.action_calls, "放行后应触达云端"
+
+
+def test_run_device_action_normal_action_unaffected(fake_api, settings):
+    """普通动作(非语音指令)仍走普通设备闸,不受影响。"""
+    settings.enable_control = True
+    mcp = build_server(settings, api=fake_api)
+    msg = _run(
+        _call(
+            mcp,
+            "run_device_action",
+            {"device": "客厅台灯", "action_name": "toggle"},
+        )
+    )
+    assert "执行成功" in msg
+
+
 def test_snapshot_does_not_touch_changes_baseline(fake_api, settings):
     """get_home_snapshot 不应重置 get_home_changes 的对比基线。"""
     mcp = build_server(settings, api=fake_api)
@@ -381,3 +435,28 @@ def test_auth_status_without_login(settings):
     data = _run(_call(mcp, "auth_status"))
     assert data["logged_in"] is False
     assert "login" in data["hint"]
+
+
+def test_http_token_disabled_by_default(fake_api, settings):
+    """不配 http_token 时不挂鉴权(stdio 传输本地进程,无需 token)。"""
+    mcp = build_server(settings, api=fake_api)
+    assert mcp.auth is None
+
+
+def test_http_token_mounts_verifier(fake_api, settings):
+    """配了 http_token 时挂 StaticTokenVerifier:正确 token 放行、
+    错 token 拒绝。这是 HTTP 传输唯一的鉴权门,回归改坏必须报警。"""
+    settings.http_token = "secret-token-123"
+    mcp = build_server(settings, api=fake_api)
+    assert mcp.auth is not None, "配了 token 却没挂鉴权"
+
+    async def check():
+        good = await mcp.auth.verify_token("secret-token-123")
+        wrong = await mcp.auth.verify_token("wrong-token")
+        missing = await mcp.auth.verify_token("")
+        return good, wrong, missing
+
+    good, wrong, missing = _run(check())
+    assert good is not None, "正确 token 应放行"
+    assert wrong is None, "错误 token 必须拒绝"
+    assert missing is None, "空 token 必须拒绝"

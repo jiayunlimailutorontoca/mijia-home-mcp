@@ -845,7 +845,13 @@ def build_server(settings: Settings, api: Any = None) -> FastMCP:
             dev = client.resolve_device(device)
             args = {"action_name": action_name, "value": value}
             try:
-                ctx.guard.check_device(dev)
+                # execute-text-directive 让音箱执行任意语音指令,能触达全屋
+                # (含门锁),等于绕过设备白名单。不管从哪个工具进来,这个动作
+                # 都按危险音箱通道把关,不能只走普通设备闸(与 run_speaker_command 一致)
+                if action_name == "execute-text-directive":
+                    ctx.guard.check_speaker_directive(dev)
+                else:
+                    ctx.guard.check_device(dev)
                 client.invoke_action(dev, action_name, value=value)
             except Exception as exc:
                 ctx.guard.audit(

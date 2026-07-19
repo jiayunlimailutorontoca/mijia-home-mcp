@@ -40,8 +40,38 @@ PRIORITY_PROPS: tuple[str, ...] = (
 
 _PRIORITY_INDEX = {name: idx for idx, name in enumerate(PRIORITY_PROPS)}
 
-# model 里带这些词的按危险设备处理,默认不给控制
-DANGEROUS_MODEL_PATTERNS: tuple[str, ...] = ("lock", "camera", "gas", "valve", "safe")
+# 危险设备判定。miot model 形如 brand.category.variant,第二段(category)
+# 才是设备类别——靠这个判,而不是对整串做子串匹配。子串匹配会漏:
+# loock.cateye.hk1(鹿客可视猫眼门锁)里没有连续的 "lock",却是门口
+# 摄像头+门锁;也会误伤:"safe" 是 "safety" 的子串。
+#
+# 危险类别(第二段精确匹配):门锁/可视猫眼/可视门铃/摄像头/燃气或水阀/保险柜。
+DANGEROUS_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "lock",       # 门锁
+        "cateye",     # 可视猫眼(常带开锁)
+        "doorbell",   # 可视门铃
+        "camera",     # 摄像头
+        "ipc",        # 部分品牌的 IP 摄像头以 ipc 作类别段
+        "gas",        # 燃气报警/切断阀
+        "valve",      # 水阀/燃气阀
+        "safe",       # 保险柜
+        "safebox",    # 保险柜(另一种命名)
+    }
+)
+
+# 类别段判不出时的子串兜底。只放"绝不会是正常设备名子串"的词,宁可误判
+# 危险也不漏放。含 gas/valve 是因为燃气检测常用复合类别段(sensor_gas),
+# 类别精确匹配会漏,而 gas/valve 作子串不会误伤正常设备。
+# 故意不含 lock(会误伤 zimi.clock.*)和 safe(误伤 xiaomi.safety.*),
+# 这两类只走上面的精确类别段。
+_DANGEROUS_SUBSTRINGS: tuple[str, ...] = (
+    "camera",
+    "cateye",
+    "doorbell",
+    "gas",
+    "valve",
+)
 
 # 开关属性的常见名字,不同厂商的 spec 叫法不统一
 POWER_PROP_ALIASES: tuple[str, ...] = ("on", "power", "switch-status", "switch")
@@ -92,8 +122,18 @@ def humanize_value(prop: dict, value: Any) -> Any:
 
 
 def is_dangerous_model(model: str) -> bool:
+    """门锁/摄像头/门铃/燃气水阀/保险柜按危险设备对待。
+
+    优先看 miot model 的类别段(brand.category.variant 的第二段),
+    段命中即危险;取不到规范的三段式再退回子串兜底。
+    """
     model = (model or "").lower()
-    return any(pat in model for pat in DANGEROUS_MODEL_PATTERNS)
+    if not model:
+        return False
+    parts = model.split(".")
+    if len(parts) >= 2 and parts[1] in DANGEROUS_CATEGORIES:
+        return True
+    return any(sub in model for sub in _DANGEROUS_SUBSTRINGS)
 
 
 def is_low_battery(prop_name: str, value: Any) -> bool:

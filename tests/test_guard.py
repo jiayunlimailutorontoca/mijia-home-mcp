@@ -83,6 +83,21 @@ def test_speaker_directive_released_by_exact_allow(tmp_path):
     guard2.check_speaker_directive(SPEAKER)
 
 
+CAMERA = {"name": "门口猫眼", "did": "did_cateye", "model": "loock.cateye.hk1"}
+
+
+def test_camera_blocked_like_lock(tmp_path):
+    """非门锁的危险设备(可视猫眼)同样按危险类别拦,--allow "*" 不放行。"""
+    guard = ControlGuard(_settings(tmp_path, enable_control=True, allow=["*"]))
+    with pytest.raises(ControlDenied, match="危险类别"):
+        guard.check_device(CAMERA)
+    # 精确名放行
+    guard2 = ControlGuard(
+        _settings(tmp_path, enable_control=True, allow=["门口猫眼"])
+    )
+    guard2.check_device(CAMERA)
+
+
 def test_allowlist_excludes_others(tmp_path):
     guard = ControlGuard(
         _settings(tmp_path, enable_control=True, allow=["卧室*"])
